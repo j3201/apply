@@ -1,201 +1,349 @@
 <template>
   <div class="container">
-    <h2>上传报销审核表数据</h2>
-    <div class="button-row">
-      <el-button type="primary" @click="triggerFileUpload">选择上传 A 表</el-button>
-      <input ref="fileInput" type="file" accept=".xlsx,.csv" @change="handleFileChange" style="position:absolute; left:-9999px; opacity:0" />
-      <el-button type="warning" @click="triggerPortTrafficUpload">上传港口交通清单</el-button>
-      <input ref="portTrafficInput" type="file" accept=".xlsx,.csv" @change="handlePortTrafficFileChange" style="position:absolute; left:-9999px; opacity:0" />
-      <el-button type="success" @click="handleExport">导出津贴明细表</el-button>
-      <el-button type="info" @click="handleExportTraffic">导出交通明细表</el-button>
-      <el-button type="warning" @click="handleExportSummary">导出交通津贴汇总</el-button>
-      <el-button type="primary" @click="handleExportAllZip">导出全部（ZIP）</el-button>
-    </div>
-    <div class="defaults-row">
-      <span class="defaults-label">默认工号</span>
-      <el-input
-        v-model="defaultEmployeeId"
-        placeholder="默认工号 (例如 123)"
-        style="width: 220px"
-        clearable
-      />
-      <span class="defaults-label">默认姓名</span>
-      <el-input
-        v-model="defaultName"
-        placeholder="默认姓名 (例如 admin)"
-        style="width: 220px"
-        clearable
-      />
-      <span class="defaults-hint">（当 A 表中没有工号/姓名时，将使用此处配置的值）</span>
-    </div>
-    <div class="status-row">
-      <span>{{ uploadStatus }}</span>
-      <span>{{ portTrafficStatus }}</span>
-    </div>
+    <el-card class="header-card" shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <span class="title">上传报销审核表数据</span>
+          <el-tag type="primary" effect="dark" size="small">
+            <el-icon><Document /></el-icon>
+            A表数据: {{ tableAData.length }} 条
+          </el-tag>
+        </div>
+      </template>
 
-    <div class="tabs-wrapper">
-      <el-tabs v-model="activeTab" type="border-card">
-        <el-tab-pane label="交通明细表" name="traffic">
-          <div class="table-card">
+      <div class="button-row">
+        <el-upload
+          :auto-upload="false"
+          :show-file-list="false"
+          accept=".xlsx,.csv"
+          :on-change="handleFileChange"
+        >
+          <el-button type="primary">
+            <el-icon><Upload /></el-icon>
+            选择上传 A 表
+          </el-button>
+        </el-upload>
+
+        <el-upload
+          :auto-upload="false"
+          :show-file-list="false"
+          accept=".xlsx,.csv"
+          :on-change="handlePortTrafficFileChange"
+        >
+          <el-button type="warning">
+            <el-icon><Upload /></el-icon>
+            上传港口交通清单
+          </el-button>
+        </el-upload>
+
+        <el-divider direction="vertical" />
+
+        <el-button type="primary" :disabled="!tableBData.length || !tableTrafficData.length" @click="handleExportAllZip">
+          <el-icon><FolderOpened /></el-icon>
+          导出全部（ZIP）
+        </el-button>
+      </div>
+
+      <el-divider />
+
+      <el-form :inline="true" class="defaults-form">
+        <el-form-item label="默认工号">
+          <el-input
+            v-model="defaultEmployeeId"
+            placeholder="默认工号 (例如 123)"
+            style="width: 200px"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="默认姓名">
+          <el-input
+            v-model="defaultName"
+            placeholder="默认姓名 (例如 admin)"
+            style="width: 200px"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-text type="info" size="small">
+            （当 A 表中没有工号/姓名时，将使用此处配置的值）
+          </el-text>
+        </el-form-item>
+      </el-form>
+
+      <el-alert
+        v-if="uploadStatus || portTrafficStatus"
+        :title="uploadStatus || portTrafficStatus"
+        :type="uploadStatus.includes('失败') || portTrafficStatus.includes('失败') ? 'error' : 'success'"
+        :closable="false"
+        show-icon
+      />
+    </el-card>
+
+    <el-tabs v-model="activeTab" type="border-card" class="main-tabs">
+      <el-tab-pane name="traffic">
+        <template #label>
+          <el-badge :value="tableTrafficData.length" :hidden="!tableTrafficData.length" type="primary">
+            <span>交通明细表</span>
+          </el-badge>
+        </template>
+
+        <el-card class="table-card" shadow="never">
+          <template #header>
             <div class="table-header-row">
-              <h2>交通明细表</h2>
-              <div class="table-actions">
+              <div class="header-left">
+                <el-icon class="table-icon"><Location /></el-icon>
+                <span>交通明细表</span>
+              </div>
+              <div class="header-right">
                 <el-button type="text" @click="showColumnSettings = !showColumnSettings">
+                  <el-icon><Setting /></el-icon>
                   列设置
                 </el-button>
-                <el-switch v-model="enableRowEditing" active-text="可编辑" inactive-text="只读" />
+                <el-switch
+                  v-model="enableRowEditing"
+                  active-text="可编辑"
+                  inactive-text="只读"
+                  size="small"
+                />
               </div>
             </div>
-            
-            <div v-if="showColumnSettings" class="column-settings-panel">
-              <div class="settings-hint">提示：所有字段均可编辑，点击单元格即可修改</div>
-              <el-checkbox-group v-model="selectedColumns">
+          </template>
+
+          <el-collapse-transition>
+            <el-card v-if="showColumnSettings" class="column-settings-card" shadow="hover">
+              <template #header>
+                <div class="settings-header">
+                  <el-icon><InfoFilled /></el-icon>
+                  <span>列显隐控制</span>
+                </div>
+              </template>
+              <el-text type="info" size="small" class="settings-hint">
+                提示：所有字段均可编辑，点击单元格即可修改
+              </el-text>
+              <el-checkbox-group v-model="selectedColumns" class="column-checkboxes">
                 <el-checkbox
                   v-for="col in trafficColumns"
                   :key="col.prop"
                   :label="col.prop"
-                  :checked="col.visible"
                   @change="toggleColumn(col.prop)"
                 >
                   {{ col.label }}
                 </el-checkbox>
               </el-checkbox-group>
-            </div>
+            </el-card>
+          </el-collapse-transition>
 
-            <div v-if="tableTrafficData.length">
-              <el-table :data="tableTrafficData" border style="width: 100%;" size="small">
-                <template v-for="col in trafficColumns" :key="col.prop">
-                  <el-table-column
-                    v-if="col.visible"
-                    :prop="col.prop"
-                    :label="col.label"
-                    :width="col.width === 'auto' ? undefined : col.width"
-                    :min-width="col.width === 'auto' ? '140' : undefined"
-                    :header-cell-style="headerStyle"
-                    :show-overflow-tooltip="col.width === 'auto'"
+          <el-table
+            v-if="tableTrafficData.length"
+            :data="tableTrafficData"
+            border
+            stripe
+            size="small"
+            class="traffic-table"
+          >
+            <template v-for="col in trafficColumns" :key="col.prop">
+              <el-table-column
+                v-if="col.visible"
+                :prop="col.prop"
+                :label="col.label"
+                :width="col.width === 'auto' ? undefined : col.width"
+                :min-width="col.width === 'auto' ? '140' : undefined"
+                :header-cell-style="headerStyle"
+                :show-overflow-tooltip="col.width === 'auto'"
+              >
+                <template #default="{ row }">
+                  <el-input-number
+                    v-if="col.prop === 'trafficAllowance' && col.editable && enableRowEditing"
+                    v-model="row[col.prop]"
+                    :min="0"
+                    :precision="2"
+                    size="small"
+                    style="width:100%"
+                  />
+                  <el-autocomplete
+                    v-else-if="col.editable && enableRowEditing && (col.prop === 'region' || col.prop === 'dock')"
+                    v-model="row[col.prop]"
+                    :fetch-suggestions="(queryString: string, cb: any) => suggestPortTraffic(row, col.prop as 'region' | 'dock', queryString, cb)"
+                    :trigger-on-focus="true"
+                    clearable
+                    size="small"
+                    placeholder="输入以检索港口交通清单"
+                    style="width:100%"
+                    @select="(item: any) => applyPortSuggestion(row, col.prop as 'region' | 'dock', item)"
                   >
-                    <template #default="{ row }">
-                      <el-input-number
-                        v-if="col.prop === 'trafficAllowance' && col.editable && enableRowEditing"
-                        v-model="row[col.prop]"
-                        :min="0"
-                        size="small"
-                        style="width:100%"
-                      />
-                      <el-input
-                        v-else-if="col.editable && enableRowEditing"
-                        v-model="row[col.prop]"
-                        size="small"
-                        style="width:100%"
-                      />
-                      <span v-else>{{ row[col.prop] }}</span>
+                    <template #prefix>
+                      <el-icon><Search /></el-icon>
                     </template>
-                  </el-table-column>
+                  </el-autocomplete>
+                  <el-input
+                    v-else-if="col.editable && enableRowEditing"
+                    v-model="row[col.prop]"
+                    size="small"
+                    style="width:100%"
+                  />
+                  <span v-else>{{ row[col.prop] }}</span>
                 </template>
-              </el-table>
-              <div class="traffic-total-row">
-                <span class="traffic-total-label">金额合计：</span>
-                <span class="traffic-total-value">{{ trafficTotalAmount.toFixed(2) }}</span>
-              </div>
-            </div>
-            <div v-else class="empty-state">暂无交通明细数据，请先上传 A 表或港口交通清单。</div>
-          </div>
-        </el-tab-pane>
-        <el-tab-pane label="津贴明细表" name="allowance">
-          <div class="table-card">
+              </el-table-column>
+            </template>
+          </el-table>
+
+          <el-empty v-else description="暂无交通明细数据，请先上传 A 表或港口交通清单" />
+
+          <el-row v-if="tableTrafficData.length" :gutter="16" class="statistics-row">
+            <el-col :span="8">
+              <el-statistic title="记录数" :value="tableTrafficData.length" />
+            </el-col>
+            <el-col :span="8">
+              <el-statistic title="金额合计" :value="trafficTotalAmount" :precision="2" prefix="¥" />
+            </el-col>
+            <el-col :span="8">
+              <el-statistic title="平均金额" :value="trafficTotalAmount / tableTrafficData.length" :precision="2" prefix="¥" />
+            </el-col>
+          </el-row>
+        </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane name="allowance">
+        <template #label>
+          <el-badge :value="tableBData.length" :hidden="!tableBData.length" type="success">
+            <span>津贴明细表</span>
+          </el-badge>
+        </template>
+
+        <el-card class="table-card" shadow="never">
+          <template #header>
             <div class="table-header-row">
-              <h2>自动生成的津贴明细（B表）</h2>
-              <div class="table-actions">
-                <el-switch v-model="enableAllowanceEditing" active-text="可编辑" inactive-text="只读" />
+              <div class="header-left">
+                <el-icon class="table-icon"><Money /></el-icon>
+                <span>自动生成的津贴明细（B表）</span>
+              </div>
+              <div class="header-right">
+                <el-switch
+                  v-model="enableAllowanceEditing"
+                  active-text="可编辑"
+                  inactive-text="只读"
+                  size="small"
+                />
               </div>
             </div>
-            <div class="table-summary" v-if="tableBData.length">
-              <div class="summary-row">
-                <span class="summary-label">Subtotal in RMB</span>
-                <span class="summary-value">Meal Allowances: {{ tableBTotals.sumMeal }}</span>
-                <span class="summary-value">Additional Allowances: {{ tableBTotals.sumAdditional }}</span>
-                <span class="summary-value">Pandemic Allowance: {{ tableBTotals.sumPandemic }}</span>
-              </div>
-              <div class="summary-row grandtotal">
-                <span class="summary-label">Grandtotal in RMB</span>
-                <span class="summary-value">{{ tableBTotals.grandTotal }}</span>
-              </div>
-            </div>
-            <div v-if="tableBData.length">
-              <el-table :data="tableBData" border style="width: 100%;" :span-method="mergeBCells" size="small">
-                <el-table-column prop="jobNumber" label="JOB NUMBER" width="120" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input v-if="enableAllowanceEditing" v-model="row.jobNumber" size="small" style="width:100%" />
-                    <span v-else>{{ row.jobNumber }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="testDate" label="Survey / Testing Date" width="180" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input v-if="enableAllowanceEditing" v-model="row.testDate" size="small" style="width:100%" />
-                    <span v-else>{{ row.testDate }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="commencedTime" label="Commenced Time" width="130" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input v-if="enableAllowanceEditing" v-model="row.commencedTime" size="small" style="width:100%" />
-                    <span v-else>{{ row.commencedTime }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="completedTime" label="Completed Time" width="130" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input v-if="enableAllowanceEditing" v-model="row.completedTime" size="small" style="width:100%" />
-                    <span v-else>{{ row.completedTime }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="location" label="Location" width="120" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input v-if="enableAllowanceEditing" v-model="row.location" size="small" style="width:100%" />
-                    <span v-else>{{ row.location }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="mealAllowances" label="Meal Allowances" width="150" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input-number v-if="enableAllowanceEditing" v-model="row.mealAllowances" :min="0" size="small" style="width:100%" />
-                    <span v-else>{{ row.mealAllowances }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="additionalAllowances" label="Additional Allowances" width="180" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input-number v-if="enableAllowanceEditing" v-model="row.additionalAllowances" :min="0" size="small" style="width:100%" />
-                    <span v-else>{{ row.additionalAllowances }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="pandemicAllowance" label="疫情补贴" width="120" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input-number v-if="enableAllowanceEditing" v-model="row.pandemicAllowance" :min="0" size="small" style="width:100%" />
-                    <span v-else>{{ row.pandemicAllowance }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="totalHours" label="Total Hours" width="120" :header-cell-style="headerStyle">
-                  <template #default="{ row }">
-                    <el-input v-if="enableAllowanceEditing" v-model="row.totalHours" size="small" style="width:100%" />
-                    <span v-else>{{ row.totalHours }}</span>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-            <div v-else class="empty-state">暂无 B 表数据，请先上传 A 表。</div>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
-    </div>
+          </template>
+
+          <el-descriptions v-if="tableBData.length" :column="2" border class="summary-descriptions">
+            <el-descriptions-item>
+              <template #label>
+                <el-icon><Coin /></el-icon>
+                Subtotal in RMB
+              </template>
+              <el-text type="primary">Meal Allowances: {{ tableBTotals.sumMeal }}</el-text>
+              <el-divider direction="vertical" />
+              <el-text type="primary">Additional Allowances: {{ tableBTotals.sumAdditional }}</el-text>
+              <el-divider direction="vertical" />
+              <el-text type="primary">Pandemic Allowance: {{ tableBTotals.sumPandemic }}</el-text>
+            </el-descriptions-item>
+            <el-descriptions-item>
+              <template #label>
+                <el-icon><Tickets /></el-icon>
+                Grandtotal in RMB
+              </template>
+              <el-text type="success" size="large" tag="b">{{ tableBTotals.grandTotal }}</el-text>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-table
+            v-if="tableBData.length"
+            :data="tableBData"
+            border
+            stripe
+            size="small"
+            class="allowance-table"
+            :span-method="mergeBCells"
+          >
+            <el-table-column prop="jobNumber" label="JOB NUMBER" width="120" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-tag v-if="enableAllowanceEditing" size="small" effect="plain">
+                  <el-input v-model="row.jobNumber" size="small" style="width:100%" />
+                </el-tag>
+                <span v-else>{{ row.jobNumber }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="testDate" label="Survey / Testing Date" width="180" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input v-if="enableAllowanceEditing" v-model="row.testDate" size="small" style="width:100%" />
+                <span v-else>{{ row.testDate }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="commencedTime" label="Commenced Time" width="130" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input v-if="enableAllowanceEditing" v-model="row.commencedTime" size="small" style="width:100%" />
+                <span v-else>{{ row.commencedTime }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="completedTime" label="Completed Time" width="130" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input v-if="enableAllowanceEditing" v-model="row.completedTime" size="small" style="width:100%" />
+                <span v-else>{{ row.completedTime }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="location" label="Location" width="120" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input v-if="enableAllowanceEditing" v-model="row.location" size="small" style="width:100%" />
+                <span v-else>{{ row.location }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="mealAllowances" label="Meal Allowances" width="150" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input-number v-if="enableAllowanceEditing" v-model="row.mealAllowances" :min="0" size="small" style="width:100%" />
+                <span v-else>{{ row.mealAllowances }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="additionalAllowances" label="Additional Allowances" width="180" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input-number v-if="enableAllowanceEditing" v-model="row.additionalAllowances" :min="0" size="small" style="width:100%" />
+                <span v-else>{{ row.additionalAllowances }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pandemicAllowance" label="疫情补贴" width="120" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input-number v-if="enableAllowanceEditing" v-model="row.pandemicAllowance" :min="0" size="small" style="width:100%" />
+                <span v-else>{{ row.pandemicAllowance }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="totalHours" label="Total Hours" width="120" :header-cell-style="headerStyle">
+              <template #default="{ row }">
+                <el-input v-if="enableAllowanceEditing" v-model="row.totalHours" size="small" style="width:100%" />
+                <span v-else>{{ row.totalHours }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-empty v-else description="暂无 B 表数据，请先上传 A 表" />
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  Upload, Download, FolderOpened, Document, Location, Money, Coin, Tickets,
+  Setting, InfoFilled
+} from '@element-plus/icons-vue'
 import { usePortTrafficStore } from '@/stores/portTraffic'
-import { exportToExcel, exportTablesZip, exportTrafficToExcel, exportSummaryToExcel, importFromExcel, importPortTrafficList } from '@/utils/excel'
+import {
+  exportToExcel,
+  exportTablesZip,
+  exportTrafficToExcel,
+  exportSummaryToExcel,
+  importFromExcel
+} from '@/utils/excel'
 
 interface TableARow {
   id: string
   testDate: string
   location: string
+  region?: string
   workTime: string
   allowance: number
   name?: string
@@ -233,18 +381,13 @@ interface TableTrafficRow {
 
 // ---------------------- A表数据（报销审核表） ----------------------
 const tableAData = ref<TableARow[]>([])
-const fileInput = ref<HTMLInputElement | null>(null)
 const uploadStatus = ref('')
 
 // ---------------------- B表数据（自动生成） ----------------------
 const tableBData = ref<TableBRow[]>([])
 const tableTrafficData = ref<TableTrafficRow[]>([])
 const portTrafficStore = usePortTrafficStore()
-const headerApplicant = ref('')
-const headerBranch = ref('')
-const headerClaimDuration = ref('')
 const activeTab = ref('traffic')
-const portTrafficInput = ref<HTMLInputElement | null>(null)
 
 // ---------------------- 默认值配置（可自定义） ----------------------
 // 当 A 表中缺少工号/姓名时，使用以下默认值
@@ -349,28 +492,22 @@ onMounted(() => {
 
 const portTrafficStatus = computed(() => portTrafficStore.status)
 
-function triggerPortTrafficUpload() {
-  portTrafficInput.value?.click()
-}
-
-async function handlePortTrafficFileChange(event: Event) {
-  const files = (event.target as HTMLInputElement).files
-  if (!files?.length) return
-  const file = files[0]
-  if (!file) return
-
+async function handlePortTrafficFileChange(uploadFile: any) {
   try {
-    const rows = await portTrafficStore.loadFromFile(file)
+    const rows = await portTrafficStore.loadFromFile(uploadFile.raw)
     if (rows.length) {
       generateTrafficTable()
-    } else {
-      // loadFromFile will already set store.status when no data found or an error occurs
+      ElMessage.success({
+        message: `成功加载 ${rows.length} 条港口交通数据`,
+        duration: 3000
+      })
     }
   } catch (error) {
     portTrafficStore.status = error instanceof Error ? error.message : '加载港口交通清单失败'
-    console.error(error)
-  } finally {
-    if (portTrafficInput.value) portTrafficInput.value.value = ''
+    ElMessage.error({
+      message: portTrafficStore.status,
+      duration: 5000
+    })
   }
 }
 
@@ -382,6 +519,70 @@ function findPortTrafficByLocation(location: string, remark?: string) {
     return portTrafficStore.findByLocation(`${location} ${remark}`)
   }
   return portTrafficStore.findByLocation(location)
+}
+
+// ---------------------- 交通明细表中"地区/码头"字段的实时检索建议 ----------------------
+function queryPortTrafficSuggestions(keyword: string) {
+  const list = portTrafficStore.items || []
+  if (!list.length) return []
+  const kw = String(keyword || '').trim().toLowerCase()
+  if (!kw) {
+    return list.slice(0, 10).map((item, idx) => ({
+      id: `port-${idx}`,
+      value: '',
+      region: item.region || '',
+      dock: item.dock || '',
+      address: item.address || '',
+      amount: item.amount,
+      name: item.name || '',
+      _raw: item
+    }))
+  }
+  const matched = list.filter(item => {
+    const region = (item.region || '').toLowerCase()
+    const dock = (item.dock || '').toLowerCase()
+    const address = (item.address || '').toLowerCase()
+    const location = (item.location || '').toLowerCase()
+    return region.includes(kw) || dock.includes(kw) || address.includes(kw) || location.includes(kw)
+  })
+  return matched.slice(0, 20).map((item, idx) => ({
+    id: `port-${idx}`,
+    value: '',
+    region: item.region || '',
+    dock: item.dock || '',
+    address: item.address || '',
+    amount: item.amount,
+    name: item.name || '',
+    _raw: item
+  }))
+}
+
+function suggestPortTraffic(row: TableTrafficRow, colProp: 'region' | 'dock', queryString: string, callback: any) {
+  const suggestions = queryPortTrafficSuggestions(queryString)
+  // 候选项的 value 字段是 el-autocomplete 用于显示的文本，根据当前编辑的列变化
+  const suggestionsWithValue = suggestions.map(s => ({
+    ...s,
+    value: colProp === 'region' ? s.region : s.dock
+  }))
+  callback(suggestionsWithValue)
+}
+
+function applyPortSuggestion(row: TableTrafficRow, colProp: 'region' | 'dock', item: any) {
+  if (!item || !item._raw) return
+  const port = item._raw
+  row.region = (port.region || '').trim() || row.region
+  row.dock = (port.dock || '').trim() || row.dock
+  row.address = (port.address || '').trim() || row.address
+  row.trafficAllowance = 200
+  if (colProp === 'region') {
+    row.region = item.value || row.region
+  } else if (colProp === 'dock') {
+    row.dock = item.value || row.dock
+  }
+  ElMessage.success({
+    message: `已根据港口清单自动填充：${row.region} / ${row.dock}`,
+    duration: 2000
+  })
 }
 
 /**
@@ -508,14 +709,14 @@ function splitWorkTime(workTime: string) {
 }
 
 function generateBTable() {
-  tableBData.value = [] // 清空B表旧数据
+  tableBData.value = []
 
   tableAData.value.forEach(rowA => {
     const allowance = Number(rowA.allowance || 0)
     const baseRow = {
       jobNumber: rowA.id,
       testDate: preserveDateOnly(rowA.testDate),
-      location: rowA.location
+      location: rowA.region || rowA.location
     }
 
     const row1 = {
@@ -569,11 +770,55 @@ function mergeBCells({ row, column, rowIndex }: { row: TableBRow; column: any; r
   return [rowspan, 1]
 }
 
-// ---------------------- 辅助方法：添加/删除A表行 ----------------------
-function triggerFileUpload() {
-  fileInput.value?.click()
+// ---------------------- 辅助方法：上传A表 ----------------------
+async function handleFileChange(uploadFile: any) {
+  try {
+    if (!portTrafficStore.loaded) {
+      await portTrafficStore.initialize()
+    }
+
+    const rows = await importFromExcel(uploadFile.raw)
+    tableAData.value = rows.map(row => buildAItem({
+      ...row,
+      commencedTime1: '6:30:00',
+      completedTime1: '13:00:00',
+      commencedTime2: '13:30:00',
+      completedTime2: '19:00:00'
+    }))
+
+    if (rows.length > 0) {
+      uploadStatus.value = `已成功上传 ${rows.length} 条 A 表数据，正在生成 B 表...`
+      await nextTick()
+      if (tableBData.value.length > 0) {
+        uploadStatus.value = `已生成 ${tableBData.value.length} 条 B 表数据`
+        ElMessage.success({
+          message: `成功导入 ${rows.length} 条 A 表数据，已生成 ${tableBData.value.length} 条 B 表数据`,
+          duration: 3000
+        })
+      } else {
+        uploadStatus.value = 'A 表已上传，但未生成 B 表数据，请检查 allowance 字段是否为 160'
+        ElMessage.warning({
+          message: 'A 表已上传，但未生成 B 表数据',
+          duration: 5000
+        })
+      }
+    } else {
+      uploadStatus.value = '未解析到 A 表数据，请检查文件表头是否包含 id、testDate、location、allowance'
+      ElMessage.error({
+        message: '未解析到 A 表数据',
+        duration: 5000
+      })
+    }
+  } catch (error) {
+    uploadStatus.value = error instanceof Error ? error.message : '上传失败，请检查文件格式或内容'
+    ElMessage.error({
+      message: uploadStatus.value,
+      duration: 5000
+    })
+  }
 }
 
+// ---------------------- 辅助方法：构建A表数据 ----------------------
 function buildAItem(row: TableARow): TableARow {
   const segments = splitWorkTime(row.workTime)
   return {
@@ -586,76 +831,51 @@ function buildAItem(row: TableARow): TableARow {
   }
 }
 
-async function handleFileChange(event: Event) {
-  const files = (event.target as HTMLInputElement).files
-  if (!files?.length) return
-  const file = files[0]
-  if (!file) return
-
-  try {
-    // Ensure port traffic cache is initialized before parsing A 表
-    if (!portTrafficStore.loaded) {
-      await portTrafficStore.initialize()
-    }
-
-    const rows = await importFromExcel(file)
-    tableAData.value = rows.map(row => buildAItem({
-      ...row,
-      commencedTime1: '6:30:00',
-      completedTime1: '13:00:00',
-      commencedTime2: '13:30:00',
-      completedTime2: '19:00:00'
-    }))
-    if (rows.length > 0) {
-      uploadStatus.value = `已成功上传 ${rows.length} 条 A 表数据，正在生成 B 表...`
-      await nextTick()
-      if (tableBData.value.length > 0) {
-        uploadStatus.value = `已生成 ${tableBData.value.length} 条 B 表数据`
-      } else {
-        uploadStatus.value = 'A 表已上传，但未生成 B 表数据，请检查 allowance 字段是否为 160'
-      }
-    } else {
-      uploadStatus.value = '未解析到 A 表数据，请检查文件表头是否包含 id、testDate、location、allowance'
-    }
-  } catch (error) {
-    uploadStatus.value = error instanceof Error ? error.message : '上传失败，请检查文件格式或内容'
-    console.error(error)
-  } finally {
-    if (fileInput.value) {
-      fileInput.value.value = ''
-    }
-  }
-}
-
 // ---------------------- 导出Excel ----------------------
 function handleExport() {
   const headerInfo = {
     title: 'Allowance Monthly Report',
     company: 'Shanghai Orient Intertek Testing Services Company Limited',
-    applicantValue: headerApplicant.value,
-    branchValue: headerBranch.value,
-    claimValue: headerClaimDuration.value
+    applicantValue: '',
+    branchValue: '',
+    claimValue: ''
   }
   exportToExcel(tableBData.value, 'Allowance Details', headerInfo)
+  ElMessage.success({
+    message: '津贴明细表已导出为 Allowance Details.xlsx',
+    duration: 3000
+  })
 }
 
 function handleExportTraffic() {
   exportTrafficToExcel(tableTrafficData.value, '交通费津贴明细')
+  ElMessage.success({
+    message: '交通明细表已导出为 交通费津贴明细.xlsx',
+    duration: 3000
+  })
 }
 
 function handleExportSummary() {
   exportSummaryToExcel(tableTrafficData.value, '交通费津贴合计表')
+  ElMessage.success({
+    message: '交通津贴汇总表已导出为 交通费津贴合计表.xlsx',
+    duration: 3000
+  })
 }
 
 function handleExportAllZip() {
   const headerInfo = {
     title: 'Allowance Monthly Report',
     company: 'Shanghai Orient Intertek Testing Services Company Limited',
-    applicantValue: headerApplicant.value,
-    branchValue: headerBranch.value,
-    claimValue: headerClaimDuration.value
+    applicantValue: '',
+    branchValue: '',
+    claimValue: ''
   }
   exportTablesZip(tableTrafficData.value, tableBData.value, 'Allowance_Tables', headerInfo)
+  ElMessage.success({
+    message: '已导出全部表格为 Allowance_Tables.zip',
+    duration: 3000
+  })
 }
 
 const headerStyle = {
@@ -669,229 +889,243 @@ const headerStyle = {
 
 <style scoped>
 .container {
-  padding: 20px;
+  padding: 0;
+  min-height: calc(100vh - 40px);
 }
-.header-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 12px;
+
+.header-card {
+  margin-bottom: 20px;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
 }
-.header-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 16px;
-}
-.field-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.field-label {
-  font-size: 12px;
-  color: #333;
-  min-width: 80px;
-  text-align: right;
-  font-weight: 700;
-}
-.line-field {
-  min-width: 200px;
-  padding: 0 8px;
-  height: 30px;
-  line-height: 30px;
-}
-.no-underline {
+
+.header-card :deep(.el-card__header) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 16px 24px;
   border-bottom: none;
 }
-.left-align .field-label {
-  text-align: left;
-}
-.left-align .line-field {
-  text-align: left;
-}
-.applicant-group .line-field {
-  min-width: 220px;
-}
-.id-group .line-field {
-  min-width: 140px;
-}
-.branch-group .line-field {
-  min-width: 180px;
-}
-.claim-group .line-field {
-  min-width: 360px;
-}
-.blank-row {
-  height: 10px;
-}
-.input-row {
+
+.header-card :deep(.el-card__header) .card-header {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
 }
-.input-row input {
-  min-width: 180px;
-  padding: 4px 8px;
+
+.header-card :deep(.el-card__header) .title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
 }
+
+.header-card :deep(.el-card__body) {
+  padding: 20px 24px;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.defaults-row {
-  display: flex;
-  flex-wrap: wrap;
+  gap: 12px;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  background: #f5f9ff;
-  border: 1px solid #d9ecff;
-  border-radius: 6px;
+  margin-bottom: 16px;
 }
-.defaults-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: #303133;
-}
-.defaults-hint {
-  font-size: 12px;
-  color: #909399;
-  margin-left: 4px;
-}
-.status-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  margin-bottom: 20px;
-  color: #606266;
-}
-.tabs-wrapper {
-  margin-top: 20px;
-}
-.table-card {
-  width: 100%;
-  background: #ffffff;
-  border: 1px solid #ebeef5;
+
+.defaults-form {
+  background: #f8fafc;
+  padding: 16px 20px;
   border-radius: 8px;
-  padding: 16px;
+  border: 1px solid #e2e8f0;
 }
+
+.defaults-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.defaults-form :deep(.el-form-item__label) {
+  font-weight: 600;
+  color: #475569;
+}
+
+.main-tabs {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.main-tabs :deep(.el-tabs__header) {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.main-tabs :deep(.el-tabs__item) {
+  font-weight: 500;
+  color: #64748b;
+  padding: 16px 24px;
+}
+
+.main-tabs :deep(.el-tabs__item.is-active) {
+  color: #667eea;
+  font-weight: 600;
+}
+
+.main-tabs :deep(.el-tabs__content) {
+  padding: 0;
+}
+
+.table-card {
+  border: none;
+  background: #ffffff;
+  min-height: 400px;
+}
+
+.table-card :deep(.el-card__header) {
+  padding: 16px 20px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  border-radius: 8px 8px 0 0;
+}
+
 .table-header-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
 }
-.table-header-row h2 {
-  margin-bottom: 0;
-  font-size: 16px;
-  font-weight: 700;
-}
-.table-actions {
+
+.header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
 }
-.column-settings-panel {
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.table-icon {
+  font-size: 20px;
+  color: #667eea;
+}
+
+.column-settings-card {
+  margin-bottom: 16px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.settings-hint {
+  display: block;
+  margin-bottom: 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.column-checkboxes {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  background: #f5f9ff;
-  border: 1px solid #d9ecff;
-  border-radius: 6px;
+  gap: 20px;
 }
-.settings-hint {
-  width: 100%;
-  font-size: 12px;
-  color: #67c23a;
-  font-weight: 500;
+
+.column-checkboxes :deep(.el-checkbox) {
+  font-size: 13px;
+  color: #475569;
 }
-.table-card h2 {
-  margin-bottom: 16px;
-  font-size: 16px;
-  font-weight: 700;
+
+.traffic-table,
+.allowance-table {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
 }
-.empty-state {
-  color: #909399;
-  min-height: 100px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed #dcdfe6;
-  border-radius: 6px;
-  padding: 20px;
+
+.traffic-table :deep(.el-table),
+.allowance-table :deep(.el-table) {
+  --el-table-border-color: #e2e8f0;
+}
+
+.traffic-table :deep(.el-table__header-wrapper),
+.allowance-table :deep(.el-table__header-wrapper) {
+  background: #f8fafc;
+}
+
+.traffic-table :deep(.el-table__body tr:hover>td),
+.allowance-table :deep(.el-table__body tr:hover>td) {
+  background: #f1f5f9;
+}
+
+.traffic-table :deep(.el-table__body tr.el-table__row--striped),
+.allowance-table :deep(.el-table__body tr.el-table__row--striped) {
   background: #fafafa;
 }
-.table-summary {
+
+.statistics-row {
+  margin-top: 16px;
+  padding: 20px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border-radius: 8px;
+  border: 1px solid #bbf7d0;
+}
+
+.statistics-row :deep(.el-statistic__label) {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.statistics-row :deep(.el-statistic__content) {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.statistics-row :deep(.el-statistic__prefix) {
+  font-size: 18px;
+  color: #22c55e;
+}
+
+.summary-descriptions {
   margin-bottom: 16px;
-  padding: 12px;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  background: #f7f8fa;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
 }
-.summary-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 8px;
-  font-size: 14px;
+
+.summary-descriptions :deep(.el-descriptions__label) {
+  font-weight: 600;
+  color: #475569;
+  background: #f8fafc;
 }
-.summary-row.grandtotal {
-  font-weight: 700;
+
+.summary-descriptions :deep(.el-descriptions__content) {
+  color: #1e293b;
 }
-.summary-label {
-  min-width: 180px;
+
+:deep(.el-table__empty-text) {
+  padding: 60px 0;
+  color: #94a3b8;
 }
-.summary-value {
-  min-width: 160px;
+
+:deep(.el-switch) {
+  margin: 0;
 }
-.table-summary {
-  margin: 16px 0;
-  padding: 12px;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  background: #f7f8fa;
+
+:deep(.el-button) {
+  font-weight: 500;
 }
-.summary-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-.summary-row.grandtotal {
-  font-weight: 700;
-}
-.summary-label {
-  min-width: 180px;
-}
-.summary-value {
-  min-width: 160px;
-}
-.traffic-total-row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 12px 16px;
-  background: #f0f9eb;
-  border: 1px solid #e1f3d8;
-  border-radius: 6px;
-}
-.traffic-total-label {
-  font-size: 14px;
-  font-weight: 700;
-  color: #303133;
-}
-.traffic-total-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: #67c23a;
+
+:deep(.el-autocomplete) {
+  --el-input-focus-border-color: #667eea;
 }
 </style>

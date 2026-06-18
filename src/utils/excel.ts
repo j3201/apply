@@ -6,6 +6,7 @@ export interface ImportedTableARow {
   id: string
   testDate: string
   location: string
+  region?: string
   workTime: string
   allowance: number
   name?: string
@@ -43,13 +44,17 @@ const headerMap: Record<string, keyof ImportedTableARow> = {
   工作日期: 'testDate',
   日期: 'testDate',
 
-  // 地点相关
+  // 地点相关 - 检验地点用于交通明细表检索
   location: 'location',
-  区域: 'location',
   地点: 'location',
   检验地点: 'location',
   工作地点: 'location',
   所在地: 'location',
+
+  // 区域相关 - 区域用于津贴明细表的 location 字段
+  region: 'region',
+  区域: 'region',
+  地区: 'region',
 
   // 工作时间相关
   worktime: 'workTime',
@@ -205,10 +210,14 @@ interface ParseResult<T> {
 }
 
 function buildRowFromRaw(raw: Record<string, string | number | null>): ImportedTableARow {
+  const region = raw.region !== undefined && raw.region !== null ? String(raw.region).trim() : undefined
+  const locationRaw = String(raw.location ?? '').trim()
+  
   return {
     id: String(raw.id ?? '').trim(),
     testDate: formatYMD(String(raw.testDate ?? '').trim()),
-    location: String(raw.location ?? '').trim(),
+    location: locationRaw || region || '',
+    region,
     workTime: String(raw.workTime ?? '').trim(),
     allowance: Number(raw.allowance ?? 0),
     name: raw.name !== undefined && raw.name !== null ? String(raw.name).trim() : undefined,
@@ -306,7 +315,7 @@ function parseCsv(content: string): ParseResult<ImportedTableARow> {
       }
     })
 
-    if (raw.id && raw.testDate && raw.location && raw.workTime && raw.allowance !== null && raw.allowance !== undefined && raw.allowance !== '') {
+    if (raw.id && raw.testDate && (raw.location || raw.region) && raw.workTime && raw.allowance !== null && raw.allowance !== undefined && raw.allowance !== '') {
       rows.push(buildRowFromRaw(raw))
     }
   }
@@ -388,7 +397,7 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParseResult<ImportedTable
           raw[key] = key === 'allowance' || key === 'portFee' ? Number(textValue) : textValue
         })
 
-        if (raw.id && raw.testDate && raw.location && raw.workTime && raw.allowance !== null && raw.allowance !== undefined && raw.allowance !== '') {
+        if (raw.id && raw.testDate && (raw.location || raw.region) && raw.workTime && raw.allowance !== null && raw.allowance !== undefined && raw.allowance !== '') {
           rows.push(buildRowFromRaw(raw))
         }
       })
@@ -944,9 +953,7 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
  */
 
 async function buildTrafficWorkbook(data: ExportTrafficRow[]) {
-  // 创建新的Excel工作簿
   const workbook = new ExcelJS.Workbook()
-  // 添加名为"交通明细"的工作表
   const worksheet = workbook.addWorksheet('交通明细')
   // 定义表头映射关系，将英文字段名映射为中文字段名
   const headerMap: Record<string, string> = {
@@ -1141,6 +1148,49 @@ export async function exportTablesZip(
   zip.file('Allowance Details.xlsx', allowanceBuffer)
 
   const content = await zip.generateAsync({ type: 'blob' })
+  
+  interface FilePickerOptions {
+    suggestedName?: string
+    types?: Array<{
+      description: string
+      accept: Record<string, string[]>
+    }>
+  }
+  
+  interface FileSystemWritableFileStream {
+    write(data: Blob): Promise<void>
+    close(): Promise<void>
+  }
+  
+  interface FileSystemFileHandle {
+    createWritable(): Promise<FileSystemWritableFileStream>
+  }
+  
+  type SaveFilePickerFn = (options: FilePickerOptions) => Promise<FileSystemFileHandle>
+  
+  const saveFilePicker = (window as unknown as { showSaveFilePicker?: SaveFilePickerFn }).showSaveFilePicker
+  if (saveFilePicker) {
+    try {
+      const handle = await saveFilePicker({
+        suggestedName: `${filename}.zip`,
+        types: [
+          {
+            description: 'ZIP Archive',
+            accept: {
+              'application/zip': ['.zip']
+            }
+          }
+        ]
+      })
+      const writable = await handle.createWritable()
+      await writable.write(content)
+      await writable.close()
+      return
+    } catch (err) {
+      console.log('User cancelled or error in save file picker:', err)
+    }
+  }
+  
   saveAs(content, `${filename}.zip`)
 }
 
