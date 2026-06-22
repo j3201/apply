@@ -757,7 +757,7 @@ function splitWorkTime(workTime: string) {
   }
 }
 
-function isLegalHoliday(dateStr: string): boolean {
+function isLegalHolidayAndWeekend(dateStr: string): boolean {
   const date = new Date(dateStr)
   if (isNaN(date.getTime())) return false
   
@@ -772,7 +772,10 @@ function isLegalHoliday(dateStr: string): boolean {
     { month: 10, day: 3 }
   ]
   
-  return legalHolidays.some(h => h.month === month && h.day === day)
+  const isHoliday = legalHolidays.some(h => h.month === month && h.day === day)
+  const isWeekend = date.getDay() === 0 || date.getDay() === 6
+  
+  return isHoliday && isWeekend
 }
 
 function generateBTable() {
@@ -781,8 +784,8 @@ function generateBTable() {
   tableAData.value.forEach(rowA => {
     const testDate = preserveDateOnly(rowA.testDate)
     
-    if (isLegalHoliday(testDate)) {
-      console.log(`跳过节假日行: ${testDate}`)
+    if (isLegalHolidayAndWeekend(testDate)) {
+      console.log(`跳过节假日且处于周末的行: ${testDate}`)
       return
     }
 
