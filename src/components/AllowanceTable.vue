@@ -758,11 +758,15 @@ function splitWorkTime(workTime: string) {
 }
 
 function isLegalHoliday(dateStr: string): boolean {
-  const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return false
+  if (!dateStr) return false
   
-  const month = date.getMonth() + 1
-  const day = date.getDate()
+  // 解析日期字符串，提取月和日
+  // 支持格式：2026/4/5, 2026/04/05, 2026-4-5, 2026-04-05 等
+  const match = dateStr.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
+  if (!match || !match[2] || !match[3]) return false
+  
+  const month = parseInt(match[2], 10)
+  const day = parseInt(match[3], 10)
   
   const legalHolidays = [
     { month: 1, day: 1 },    // 元旦
