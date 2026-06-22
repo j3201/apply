@@ -757,14 +757,41 @@ function splitWorkTime(workTime: string) {
   }
 }
 
+function isLegalHoliday(dateStr: string): boolean {
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return false
+  
+  const month = date.getMonth() + 1
+  const day = date.getDate()
+  
+  const legalHolidays = [
+    { month: 1, day: 1 },
+    { month: 5, day: 1 },
+    { month: 10, day: 1 },
+    { month: 10, day: 2 },
+    { month: 10, day: 3 }
+  ]
+  
+  const weekend = date.getDay() === 0 || date.getDay() === 6
+  
+  return weekend || legalHolidays.some(h => h.month === month && h.day === day)
+}
+
 function generateBTable() {
   tableBData.value = []
 
   tableAData.value.forEach(rowA => {
+    const testDate = preserveDateOnly(rowA.testDate)
+    
+    if (isLegalHoliday(testDate)) {
+      console.log(`跳过节假日行: ${testDate}`)
+      return
+    }
+
     const allowance = Number(rowA.allowance || 0)
     const baseRow = {
       jobNumber: rowA.id,
-      testDate: preserveDateOnly(rowA.testDate),
+      testDate,
       location: rowA.region || rowA.location
     }
 
