@@ -765,9 +765,11 @@ function isLegalHoliday(dateStr: string): boolean {
   const day = date.getDate()
   
   const legalHolidays = [
-    { month: 1, day: 1 },
-    { month: 5, day: 1 },
-    { month: 10, day: 1 },
+    { month: 1, day: 1 },    // 元旦
+    { month: 4, day: 4 },    // 清明节
+    { month: 4, day: 5 },    // 清明节（可能日期）
+    { month: 5, day: 1 },    // 劳动节
+    { month: 10, day: 1 },   // 国庆节
     { month: 10, day: 2 },
     { month: 10, day: 3 }
   ]
