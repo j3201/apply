@@ -569,36 +569,6 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
     }
   })
 
-  // 按同一个 JOB NUMBER + Survey / Testing Date + Location 合并连续重复单元格
-  const mergeColumns = ['jobNumber', 'testDate', 'location'] as const
-  let groupStart = 0
-  let groupKey = data.length > 0 ? `${data[0].jobNumber}|${data[0].testDate}|${data[0].location}` : ''
-
-  const dataStartRow = headerInfo ? headerRowIndex + 1 : headerRowIndex + 1
-
-  const mergeGroup = (startIndex: number, endIndex: number) => {
-    if (endIndex <= startIndex) return
-    const startRow = dataStartRow + startIndex
-    const endRow = dataStartRow + endIndex
-    mergeColumns.forEach(columnKey => {
-      const columnIndex = headers.indexOf(columnKey) + 1
-      if (columnIndex > 0) {
-        worksheet.mergeCells(startRow, columnIndex, endRow, columnIndex)
-        worksheet.getCell(startRow, columnIndex).alignment = { vertical: 'middle', horizontal: 'center' }
-      }
-    })
-  }
-
-  for (let i = 1; i < data.length; i++) {
-    const currentKey = `${data[i].jobNumber}|${data[i].testDate}|${data[i].location}`
-    if (currentKey !== groupKey) {
-      mergeGroup(groupStart, i - 1)
-      groupStart = i
-      groupKey = currentKey
-    }
-  }
-  mergeGroup(groupStart, data.length - 1)
-
   // 在数据下面插入统计行（Subtotal / Grandtotal）
   try {
     const sumMeal = data.reduce((s, r) => s + Number(r.mealAllowances || 0), 0)
@@ -824,47 +794,6 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
       right: { style: 'thin' }
     }
   })
-
-  const mergeColumns = ['jobNumber', 'testDate', 'location'] as const
-  let groupStart = 0
-  let groupKey = data.length > 0 ? `${data[0].jobNumber}|${data[0].testDate}|${data[0].location}` : ''
-  const dataStartRow = headerInfo ? headerRowIndex + 1 : headerRowIndex + 1
-
-/**
- * 合并指定范围内的单元格
- * @param {number} startIndex - 起始索引
- * @param {number} endIndex - 结束索引
- */
-  const mergeGroup = (startIndex: number, endIndex: number) => {
-  // 如果结束索引小于等于起始索引，则直接返回，不执行合并操作
-    if (endIndex <= startIndex) return
-  // 计算实际的起始行号（基于数据起始行和起始索引）
-    const startRow = dataStartRow + startIndex
-  // 计算实际的结束行号（基于数据起始行和结束索引）
-    const endRow = dataStartRow + endIndex
-  // 遍历所有需要合并的列
-    mergeColumns.forEach(columnKey => {
-    // 获取列索引（基于表头中的列位置）
-      const columnIndex = headers.indexOf(columnKey) + 1
-    // 如果列存在（索引大于0），则执行合并操作
-      if (columnIndex > 0) {
-      // 合并指定范围内的单元格
-        worksheet.mergeCells(startRow, columnIndex, endRow, columnIndex)
-      // 设置合并后单元格的对齐方式为垂直和水平居中
-        worksheet.getCell(startRow, columnIndex).alignment = { vertical: 'middle', horizontal: 'center' }
-      }
-    })
-  }
-
-  for (let i = 1; i < data.length; i++) {
-    const currentKey = `${data[i].jobNumber}|${data[i].testDate}|${data[i].location}`
-    if (currentKey !== groupKey) {
-      mergeGroup(groupStart, i - 1)
-      groupStart = i
-      groupKey = currentKey
-    }
-  }
-  mergeGroup(groupStart, data.length - 1)
 
   try {
     const sumMeal = data.reduce((s, r) => s + Number(r.mealAllowances || 0), 0)
