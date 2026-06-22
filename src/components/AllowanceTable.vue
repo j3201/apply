@@ -772,9 +772,7 @@ function isLegalHoliday(dateStr: string): boolean {
     { month: 10, day: 3 }
   ]
   
-  const weekend = date.getDay() === 0 || date.getDay() === 6
-  
-  return weekend || legalHolidays.some(h => h.month === month && h.day === day)
+  return legalHolidays.some(h => h.month === month && h.day === day)
 }
 
 function generateBTable() {
