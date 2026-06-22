@@ -292,7 +292,6 @@
             stripe
             size="small"
             class="allowance-table"
-            :span-method="mergeBCells"
           >
             <el-table-column prop="jobNumber" label="JOB NUMBER" width="120" :header-cell-style="headerStyle">
               <template #default="{ row }">
@@ -760,7 +759,23 @@ function splitWorkTime(workTime: string) {
 function generateBTable() {
   tableBData.value = []
 
+  // 节假日关键词列表（包含这些关键词的行将被自动过滤掉）
+  const holidayKeywords = ['节假日', '三倍', '三薪', '假日', 'weekend', 'holiday', '周末']
+
+  // 检查是否为节假日行
+  function isHolidayRow(remark?: string): boolean {
+    if (!remark) return false
+    const lowerRemark = remark.toLowerCase()
+    return holidayKeywords.some(keyword => lowerRemark.includes(keyword.toLowerCase()))
+  }
+
   tableAData.value.forEach(rowA => {
+    // 如果备注中包含节假日关键词，则跳过该行
+    if (isHolidayRow(rowA.remark)) {
+      console.log(`跳过节假日行: ${rowA.testDate} - ${rowA.remark}`)
+      return
+    }
+
     const allowance = Number(rowA.allowance || 0)
     const baseRow = {
       jobNumber: rowA.id,
@@ -852,32 +867,6 @@ function deleteTrafficRow(index: number) {
     message: '已删除该行交通明细',
     duration: 2000
   })
-}
-
-function mergeBCells({ row, column, rowIndex }: { row: TableBRow; column: any; rowIndex: number }) {
-  const mergeFields = ['jobNumber', 'testDate', 'location']
-  if (!mergeFields.includes(column.property)) {
-    return [1, 1]
-  }
-
-  if (rowIndex > 0) {
-    const prev = tableBData.value[rowIndex - 1]
-    if (prev && prev.jobNumber === row.jobNumber && prev.testDate === row.testDate && prev.location === row.location) {
-      return [0, 0]
-    }
-  }
-
-  let rowspan = 1
-  for (let i = rowIndex + 1; i < tableBData.value.length; i++) {
-    const next = tableBData.value[i]
-    if (next && next.jobNumber === row.jobNumber && next.testDate === row.testDate && next.location === row.location) {
-      rowspan++
-    } else {
-      break
-    }
-  }
-
-  return [rowspan, 1]
 }
 
 // ---------------------- 辅助方法：上传A表 ----------------------

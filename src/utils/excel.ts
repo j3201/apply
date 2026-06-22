@@ -599,18 +599,17 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
       }
     }
 
-    // Grandtotal 行：将合计显示在第7-9列合并单元格中
+    // Grandtotal 行：左侧合并为说明，总金额显示在最后一列（Total Hours列）
     worksheet.insertRow(subtotalIdx + 1, [])
     const grandIdx = subtotalIdx + 1
-    worksheet.mergeCells(grandIdx, 1, grandIdx, 6)
+    worksheet.mergeCells(grandIdx, 1, grandIdx, 9)
     worksheet.getCell(grandIdx, 1).value = 'Grandtotal in RMB'
     worksheet.getCell(grandIdx, 1).font = { name: 'Times New Roman', size: 12, bold: true }
-    worksheet.mergeCells(grandIdx, 7, grandIdx, 9)
-    worksheet.getCell(grandIdx, 7).value = grandTotal || 0
+    worksheet.getCell(grandIdx, headers.length).value = grandTotal || 0
     // 样式
     for (let c = 1; c <= headers.length; c++) {
       const cell = worksheet.getCell(grandIdx, c)
-      cell.alignment = { vertical: 'middle', horizontal: c === 7 ? 'center' : 'left' }
+      cell.alignment = { vertical: 'middle', horizontal: c === headers.length ? 'center' : 'left' }
       cell.border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
@@ -821,14 +820,13 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
     }
     worksheet.insertRow(subtotalIdx + 1, [])
     const grandIdx = subtotalIdx + 1
-    worksheet.mergeCells(grandIdx, 1, grandIdx, 6)
+    worksheet.mergeCells(grandIdx, 1, grandIdx, 9)
     worksheet.getCell(grandIdx, 1).value = 'Grandtotal in RMB'
     worksheet.getCell(grandIdx, 1).font = { name: 'Times New Roman', size: 12, bold: true }
-    worksheet.mergeCells(grandIdx, 7, grandIdx, 9)
-    worksheet.getCell(grandIdx, 7).value = grandTotal || 0
+    worksheet.getCell(grandIdx, headers.length).value = grandTotal || 0
     for (let c = 1; c <= headers.length; c++) {
       const cell = worksheet.getCell(grandIdx, c)
-      cell.alignment = { vertical: 'middle', horizontal: c === 7 ? 'center' : 'left' }
+      cell.alignment = { vertical: 'middle', horizontal: c === headers.length ? 'center' : 'left' }
       cell.border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
