@@ -42,6 +42,11 @@
           <el-icon><FolderOpened /></el-icon>
           导出全部（ZIP）
         </el-button>
+
+        <el-button type="danger" @click="handleResetData">
+          <el-icon><RefreshRight /></el-icon>
+          重置
+        </el-button>
       </div>
 
       <el-divider />
@@ -93,8 +98,20 @@
               <div class="header-left">
                 <el-icon class="table-icon"><Location /></el-icon>
                 <span>交通明细表</span>
+                <el-tag v-if="tableTrafficData.length" type="primary" size="small" style="margin-left: 12px">
+                  总金额: ¥{{ trafficTotalAmount.toFixed(2) }}
+                </el-tag>
               </div>
               <div class="header-right">
+                <el-button
+                  v-if="enableRowEditing"
+                  type="primary"
+                  size="small"
+                  icon="Plus"
+                  @click="addTrafficRow"
+                >
+                  新增行
+                </el-button>
                 <el-button type="text" @click="showColumnSettings = !showColumnSettings">
                   <el-icon><Setting /></el-icon>
                   列设置
@@ -185,18 +202,28 @@
                 </template>
               </el-table-column>
             </template>
+            <el-table-column label="操作" width="100" :header-cell-style="headerStyle">
+              <template #default="{ row, $index }">
+                <el-button
+                  v-if="enableRowEditing"
+                  type="danger"
+                  size="small"
+                  icon="Delete"
+                  @click="deleteTrafficRow($index)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
 
           <el-empty v-else description="暂无交通明细数据，请先上传 A 表或港口交通清单" />
 
           <el-row v-if="tableTrafficData.length" :gutter="16" class="statistics-row">
-            <el-col :span="8">
+            <el-col :span="12">
               <el-statistic title="记录数" :value="tableTrafficData.length" />
             </el-col>
-            <el-col :span="8">
-              <el-statistic title="金额合计" :value="trafficTotalAmount" :precision="2" prefix="¥" />
-            </el-col>
-            <el-col :span="8">
+            <el-col :span="12">
               <el-statistic title="平均金额" :value="trafficTotalAmount / tableTrafficData.length" :precision="2" prefix="¥" />
             </el-col>
           </el-row>
@@ -218,6 +245,15 @@
                 <span>自动生成的津贴明细（B表）</span>
               </div>
               <div class="header-right">
+                <el-button
+                  v-if="enableAllowanceEditing"
+                  type="primary"
+                  size="small"
+                  icon="Plus"
+                  @click="addAllowanceRow"
+                >
+                  新增行
+                </el-button>
                 <el-switch
                   v-model="enableAllowanceEditing"
                   active-text="可编辑"
@@ -314,6 +350,19 @@
                 <span v-else>{{ row.totalHours }}</span>
               </template>
             </el-table-column>
+            <el-table-column label="操作" width="100" :header-cell-style="headerStyle">
+              <template #default="{ row, $index }">
+                <el-button
+                  v-if="enableAllowanceEditing"
+                  type="danger"
+                  size="small"
+                  icon="Delete"
+                  @click="deleteAllowanceRow($index)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
 
           <el-empty v-else description="暂无 B 表数据，请先上传 A 表" />
@@ -328,7 +377,7 @@ import { ref, watch, nextTick, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Upload, Download, FolderOpened, Document, Location, Money, Coin, Tickets,
-  Setting, InfoFilled
+  Setting, InfoFilled, Search, RefreshRight
 } from '@element-plus/icons-vue'
 import { usePortTrafficStore } from '@/stores/portTraffic'
 import {
@@ -457,8 +506,8 @@ watch(
   { deep: true, immediate: true }
 )
 
-// 港口交通费等于此值时新增空白行（根据业务规则：目前是 400）
-const PORT_FEE_BLANK_ROW_VALUE = 200
+// 港口交通费大于此值时新增空白行（根据业务规则：大于 380）
+const PORT_FEE_BLANK_ROW_THRESHOLD = 380
 
 function formatOutdoorDate(value: string) {
   if (!value) return ''
@@ -539,11 +588,11 @@ function queryPortTrafficSuggestions(keyword: string) {
     }))
   }
   const matched = list.filter(item => {
-    const region = (item.region || '').toLowerCase()
-    const dock = (item.dock || '').toLowerCase()
-    const address = (item.address || '').toLowerCase()
-    const location = (item.location || '').toLowerCase()
-    return region.includes(kw) || dock.includes(kw) || address.includes(kw) || location.includes(kw)
+    const region = (item.region || '').trim().toLowerCase()
+    const dock = (item.dock || '').trim().toLowerCase()
+    const address = (item.address || '').trim().toLowerCase()
+    const location = (item.location || '').trim().toLowerCase()
+    return region === kw || dock === kw || address === kw || location === kw
   })
   return matched.slice(0, 20).map((item, idx) => ({
     id: `port-${idx}`,
@@ -598,74 +647,74 @@ function applyPortSuggestion(row: TableTrafficRow, colProp: 'region' | 'dock', i
 function generateTrafficTable() {
   const result: TableTrafficRow[] = []
 
-  tableAData.value.forEach(row => {
+  console.log('=== 开始生成交通明细表 ===')
+  console.log('A表数据行数:', tableAData.value.length)
+
+  tableAData.value.forEach((row, index) => {
     const outdoorDate = formatOutdoorDate(row.testDate)
     const payMonth = (row.payMonth || '').trim() || formatPayMonthFromDate(row.testDate)
-    // 工号：固定使用默认值，可自定义修改
     const employeeId = (defaultEmployeeId.value || '').trim() || '123'
-    // 姓名：固定使用默认值，可自定义修改
     const rowName = (defaultName.value || '').trim() || 'admin'
-    // 备注字段：用于辅助检索港口交通清单
     const remark = (row.remark || '').trim()
 
-    // 规则 1：港口交通费 === 400 时新增一行"空白行"
-    // 金额固定为 200
-    const portFee = Number(row.portFee !== undefined && row.portFee !== null ? row.portFee : row.allowance)
-    if (portFee === PORT_FEE_BLANK_ROW_VALUE) {
-      result.push({
-        outdoorDate,
-        payMonth,
-        employeeId,
-        name: rowName,
-        region: '',
-        dock: '',
-        address: '',
-        trafficAllowance: 200
-      })
-    }
-
-    // 规则 2：按检验地点（+ 备注）匹配港口交通清单
-    //         命中 → 将清单中的 地区/码头/地址/金额 写入交通明细表
-    //         金额固定为 200
     const portItem = findPortTrafficByLocation(row.location, remark || undefined)
+    
+    let region = ''
+    let dock = ''
+    let address = ''
+    let name = rowName
+    
     if (portItem) {
       const rawRegion = (portItem.region || '').trim()
       const rawDock = (portItem.dock || '').trim()
       const rawAddress = (portItem.address || '').trim()
       const portLocation = (portItem.location || '').trim()
 
-      // region：优先清单 region；为空时用清单 location
-      const region = rawRegion || portLocation || ''
-      // dock：优先清单 dock；为空时用清单 location
-      const dock = rawDock || portLocation || ''
-      // address：仅来自清单，为空保持空
-      const address = rawAddress
-      // 姓名：优先清单中的 name；缺失时使用 A 表 name
-      const name = (portItem.name?.trim()) || rowName
-      result.push({
-        outdoorDate,
-        payMonth,
-        employeeId,
-        name,
-        region,
-        dock,
-        address,
-        trafficAllowance: 200
-      })
-      return
+      region = rawRegion || portLocation || ''
+      dock = rawDock || portLocation || ''
+      address = rawAddress
+      name = (portItem.name?.trim()) || rowName
+    } else {
+      region = row.location?.trim() || ''
     }
 
-    // 未命中清单 → 地区 = 检验地点，码头/地址为空，金额固定为 200
-    result.push({
+    const currentRow: TableTrafficRow = {
       outdoorDate,
       payMonth,
       employeeId,
-      name: rowName,
-      region: row.location?.trim() || '',
-      dock: '',
-      address: '',
+      name,
+      region,
+      dock,
+      address,
       trafficAllowance: 200
-    })
+    }
+
+    // 判断该行的港口交通费是否大于380
+    let portFee = 0
+    const originalPortFee = row.portFee
+    
+    // 只判断港口交通费字段（portFee），不回退到allowance
+    if (row.portFee !== undefined && row.portFee !== null) {
+      if (typeof row.portFee === 'number') {
+        portFee = row.portFee
+      } else {
+        const parsed = Number(String(row.portFee).replace(/[^\d.-]/g, ''))
+        if (!isNaN(parsed)) {
+          portFee = parsed
+        }
+      }
+    }
+    
+    console.log(`行${index+1}: 日期=${row.testDate}, 港口交通费=${originalPortFee}, 解析金额=${portFee}, 是否大于380=${portFee > PORT_FEE_BLANK_ROW_THRESHOLD}`)
+    
+    // 如果港口交通费大于380，先复制一行相同的（保持相同日期）
+    if (!isNaN(portFee) && portFee > PORT_FEE_BLANK_ROW_THRESHOLD) {
+      console.log(`  -> 港口交通费>380，新增一行`)
+      result.push({ ...currentRow })
+    }
+
+    // 添加正常行
+    result.push(currentRow)
   })
 
   tableTrafficData.value = result
@@ -741,6 +790,67 @@ function generateBTable() {
 
     tableBData.value.push(row1)
     tableBData.value.push(row2)
+  })
+}
+
+function addAllowanceRow() {
+  const today = new Date().toISOString().split('T')[0] || ''
+  const id = defaultEmployeeId.value
+  const jobNumber = id ? id.trim() : '123'
+  const newRow: TableBRow = {
+    jobNumber: jobNumber,
+    testDate: today,
+    location: '',
+    commencedTime: '08:00:00',
+    completedTime: '17:00:00',
+    mealAllowances: 0,
+    additionalAllowances: 0,
+    pandemicAllowance: 0,
+    totalHours: '9:00:00'
+  }
+  tableBData.value.push(newRow)
+  ElMessage.success({
+    message: '已新增一行津贴明细',
+    duration: 2000
+  })
+}
+
+function deleteAllowanceRow(index: number) {
+  tableBData.value.splice(index, 1)
+  ElMessage.success({
+    message: '已删除该行津贴明细',
+    duration: 2000
+  })
+}
+
+function addTrafficRow() {
+  const today = new Date().toISOString().split('T')[0] || ''
+  const id = defaultEmployeeId.value
+  const empId = id ? id.trim() : '123'
+  const nameVal = defaultName.value
+  const name = nameVal ? nameVal.trim() : 'admin'
+  const newRow: TableTrafficRow = {
+    outdoorDate: today,
+    payMonth: today.substring(0, 7),
+    employeeId: empId,
+    name: name,
+    region: '',
+    dock: '',
+    address: '',
+    trafficAllowance: 200
+  }
+  tableTrafficData.value.push(newRow)
+  ElMessage.success({
+    message: '已新增一行交通明细',
+    duration: 2000
+  })
+}
+
+function deleteTrafficRow(index: number) {
+  tableTrafficData.value.splice(index, 1)
+  ElMessage.success({
+    message: '已删除该行交通明细',
+    duration: 2000
   })
 }
 
@@ -875,6 +985,18 @@ function handleExportAllZip() {
   ElMessage.success({
     message: '已导出全部表格为 Allowance_Tables.zip',
     duration: 3000
+  })
+}
+
+function handleResetData() {
+  tableAData.value = []
+  tableTrafficData.value = []
+  tableBData.value = []
+  uploadStatus.value = ''
+  activeTab.value = 'traffic'
+  ElMessage.success({
+    message: '已重置所有数据，请重新上传 A 表',
+    duration: 2000
   })
 }
 

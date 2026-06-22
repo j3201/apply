@@ -86,14 +86,12 @@ const headerMap: Record<string, keyof ImportedTableARow> = {
   结算月份: 'payMonth',
   月份: 'payMonth',
 
-  // 港口交通费相关（与津贴区分）
+  // 港口交通费相关（仅识别包含"港口"的字段）
   portfee: 'portFee',
   港口交通费: 'portFee',
-  交通费: 'portFee',
   港口交通: 'portFee',
-  交通补贴: 'portFee',
-  交通津贴: 'portFee',
-  出差交通费: 'portFee',
+  港口费: 'portFee',
+  港口金额: 'portFee',
 
   // 备注相关
   remark: 'remark',
@@ -117,14 +115,11 @@ function mapHeader(header: string): keyof ImportedTableARow | undefined {
   const direct = headerMap[normalized]
   if (direct) return direct
 
-  // 1) 港口交通费 - 特异性最高，必须优先
+  // 1) 港口交通费 - 特异性最高，必须优先（仅识别包含"港口"的字段）
   if (normalized.includes('港口')) {
     if (normalized.includes('交通') || normalized.includes('费') || normalized.includes('金额') || normalized.includes('补贴')) {
       return 'portFee'
     }
-  }
-  if (normalized.includes('交通费') || normalized.includes('交通补贴') || normalized.includes('交通津贴')) {
-    return 'portFee'
   }
 
   // 2) 支付月份
@@ -315,7 +310,7 @@ function parseCsv(content: string): ParseResult<ImportedTableARow> {
       }
     })
 
-    if (raw.id && raw.testDate && (raw.location || raw.region) && raw.workTime && raw.allowance !== null && raw.allowance !== undefined && raw.allowance !== '') {
+    if (raw.testDate && (raw.location || raw.region)) {
       rows.push(buildRowFromRaw(raw))
     }
   }
@@ -397,7 +392,7 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParseResult<ImportedTable
           raw[key] = key === 'allowance' || key === 'portFee' ? Number(textValue) : textValue
         })
 
-        if (raw.id && raw.testDate && (raw.location || raw.region) && raw.workTime && raw.allowance !== null && raw.allowance !== undefined && raw.allowance !== '') {
+        if (raw.testDate && (raw.location || raw.region)) {
           rows.push(buildRowFromRaw(raw))
         }
       })

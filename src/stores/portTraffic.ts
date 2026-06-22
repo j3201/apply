@@ -52,7 +52,12 @@ export const usePortTrafficStore = defineStore('portTraffic', () => {
       return items.value
     }
     return searchIndex.value
-      .filter(entry => entry.searchText.includes(query))
+      .filter(entry => 
+        entry.item.location.trim().toLowerCase() === query ||
+        entry.item.region.trim().toLowerCase() === query ||
+        entry.item.dock.trim().toLowerCase() === query ||
+        entry.item.address.trim().toLowerCase() === query
+      )
       .map(entry => entry.item)
   })
 
@@ -99,66 +104,80 @@ export const usePortTrafficStore = defineStore('portTraffic', () => {
     status.value = '未加载港口交通清单'}
 
   /**
-   * 按"检验地点 + 备注"检索港口交通清单。
-   * 策略：精确匹配 > 分词多字段评分匹配 > 简单包含匹配。
-   * 重点：优先匹配地区 和码头 字段，命中后将码头/地址/金额写入交通明细表。
+   * 按"检验地点"检索港口交通清单。
+   * 检验地点由省份名称和码头名称组成，策略：
+   * 1. 先按省份名称检索地区字段
+   * 2. 再按码头名称检索码头字段
    */
   const findByLocation = (location: string) => {
     if (!location) return undefined
     const normalized = location.trim().toLowerCase()
     if (!items.value.length) return undefined
 
-    // 1) 精确匹配 location 字段 - O(1)
+    // 1) 精准匹配 location 字段
     const exact = locationIndex.value.get(normalized)
     if (exact) return exact
 
-    // 2) 将输入分词（按 中文逗号/顿号/空格/英文逗号/斜杠 拆分）
-    //    例如 "江西省宜春市, 袁州区 码头" -> ["江西省宜春市", "袁州区", "码头"]
-    const tokens = normalized
-      .split(/[,，、；;\/\s]+/)
-      .map(t => t.trim())
-      .filter(t => t && t.length >= 1)
-
-    // 3) 对每条清单记录做评分：
-    //    - 重点匹配地区 和码头 字段
-    //    - 正/反向包含：字段包含输入词，或输入词包含字段
-    //    - 字段优先级：region > dock > location > address
-    const tokenCount = tokens.length || 1
-    let best: { item: PortTrafficItem; score: number } | null = null
-
-    for (const item of items.value) {
-      const itemLoc = (item.location || '').trim().toLowerCase()
-      const itemRegion = (item.region || '').trim().toLowerCase()
-      const itemDock = (item.dock || '').trim().toLowerCase()
-      const itemAddr = (item.address || '').trim().toLowerCase()
-      if (!itemLoc && !itemRegion && !itemDock && !itemAddr) continue
-
-      // 快速检查：整串包含 location 字段（最常见场景）
-      if (itemLoc && (itemLoc.includes(normalized) || normalized.includes(itemLoc))) {
-        return item
-      }
-
-      // 评分模式 - 重点匹配 region 和 dock
-      let score = 0
-      tokens.forEach(tok => {
-        if (!tok) return
-        // 权重：region 和 dock 最高（3分），location 次之（2分），address 最低（1分）
-        // 这样 A 表的"检验地点 + 备注"会优先匹配港口清单的地区和码头
-        if (itemRegion && (itemRegion.includes(tok) || tok.includes(itemRegion))) score += 3
-        if (itemDock && (itemDock.includes(tok) || tok.includes(itemDock))) score += 3
-        if (itemLoc && (itemLoc.includes(tok) || tok.includes(itemLoc))) score += 2
-        if (itemAddr && (itemAddr.includes(tok) || tok.includes(itemAddr))) score += 1
-      })
-
-      // 归一化 / 数量惩罚：需要至少一定的匹配信号
-      const threshold = tokenCount > 1 ? 2 : 2
-      if (score >= threshold && (!best || score > best.score)) {
-        best = { item, score }
+    // 2) 按省份名称检索地区字段
+    // 尝试从检验地点中提取省份名称（常见省份名）
+    const provinceNames = ['北京', '天津', '河北', '山西', '内蒙古', '辽宁', '吉林', '黑龙江',
+      '上海', '江苏', '浙江', '安徽', '福建', '江西', '山东', '河南', '湖北', '湖南',
+      '广东', '广西', '海南', '重庆', '四川', '贵州', '云南', '西藏', '陕西', '甘肃',
+      '青海', '宁夏', '新疆', '香港', '澳门', '台湾']
+    
+    for (const province of provinceNames) {
+      const provinceLower = province.toLowerCase()
+      if (normalized.includes(provinceLower)) {
+        const matchByRegion = items.value.find(item => 
+          (item.region || '').trim().toLowerCase() === provinceLower
+        )
+        if (matchByRegion) return matchByRegion
       }
     }
 
-    // 4) 返回最佳候选（若评分足够）
-    if (best) return best.item
+    // 3) 拆分检验地点，尝试分别匹配地区和码头
+    // 按常见分隔符拆分：空格、逗号、顿号、斜杠等
+    const parts = normalized.split(/[,，、；;\/\s]+/).map(p => p.trim()).filter(p => p)
+    
+    if (parts.length >= 2) {
+      // 尝试组合匹配：第一个部分匹配地区，第二个部分匹配码头
+      const regionPart = parts[0]
+      const dockPart = parts[1]
+      
+      const matchByRegionAndDock = items.value.find(item => {
+        const itemRegion = (item.region || '').trim().toLowerCase()
+        const itemDock = (item.dock || '').trim().toLowerCase()
+        return itemRegion === regionPart && itemDock === dockPart
+      })
+      if (matchByRegionAndDock) return matchByRegionAndDock
+    }
+
+    // 4) 按码头名称检索码头字段
+    for (const part of parts) {
+      const matchByDock = items.value.find(item => 
+        (item.dock || '').trim().toLowerCase() === part
+      )
+      if (matchByDock) return matchByDock
+    }
+
+    // 5) 精准匹配 region 字段（完整匹配）
+    const matchByRegion = items.value.find(item => 
+      (item.region || '').trim().toLowerCase() === normalized
+    )
+    if (matchByRegion) return matchByRegion
+
+    // 6) 精准匹配 dock 字段（完整匹配）
+    const matchByDock = items.value.find(item => 
+      (item.dock || '').trim().toLowerCase() === normalized
+    )
+    if (matchByDock) return matchByDock
+
+    // 7) 精准匹配 address 字段
+    const matchByAddress = items.value.find(item => 
+      (item.address || '').trim().toLowerCase() === normalized
+    )
+    if (matchByAddress) return matchByAddress
+
     return undefined
   }
 
