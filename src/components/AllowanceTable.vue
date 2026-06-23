@@ -770,11 +770,18 @@ function isLegalHoliday(dateStr: string): boolean {
   
   const legalHolidays = [
     { month: 1, day: 1 },    // 元旦
+    { month: 2, day: 17 },   // 春节（农历除夕）
+    { month: 2, day: 18 },   // 春节（正月初一）
+    { month: 2, day: 19 },   // 春节（初二）
+    { month: 2, day: 20 },   // 春节（初三）
     { month: 4, day: 5 },    // 清明节
     { month: 5, day: 1 },    // 劳动节
+    { month: 5, day: 2 },    // 劳动节
+    { month: 6, day: 19 },   // 端午节（农历五月初五）
     { month: 10, day: 1 },   // 国庆节
-    { month: 10, day: 2 },
-    { month: 10, day: 3 }
+    { month: 10, day: 2 },   // 国庆节
+    { month: 10, day: 3 },   // 国庆节
+    { month: 10, day: 4 }    // 中秋节
   ]
   
   return legalHolidays.some(h => h.month === month && h.day === day)
