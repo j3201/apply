@@ -204,21 +204,33 @@ interface ParseResult<T> {
   error?: string
 }
 
+const safeStr = (v: unknown): string => {
+  if (v === null || v === undefined) return ''
+  const s = String(v).trim()
+  return s === 'undefined' || s === 'null' ? '' : s
+}
+
+const safeNum = (v: unknown): number => {
+  if (v === null || v === undefined || v === '') return 0
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
 function buildRowFromRaw(raw: Record<string, string | number | null>): ImportedTableARow {
-  const region = raw.region !== undefined && raw.region !== null ? String(raw.region).trim() : undefined
-  const locationRaw = String(raw.location ?? '').trim()
+  const region = safeStr(raw.region) || undefined
+  const locationRaw = safeStr(raw.location)
   
   return {
-    id: String(raw.id ?? '').trim(),
-    testDate: formatYMD(String(raw.testDate ?? '').trim()),
+    id: safeStr(raw.id),
+    testDate: formatYMD(safeStr(raw.testDate)),
     location: locationRaw || region || '',
     region,
-    workTime: String(raw.workTime ?? '').trim(),
-    allowance: Number(raw.allowance ?? 0),
-    name: raw.name !== undefined && raw.name !== null ? String(raw.name).trim() : undefined,
-    payMonth: raw.payMonth !== undefined && raw.payMonth !== null ? String(raw.payMonth).trim() : undefined,
-    portFee: raw.portFee !== undefined && raw.portFee !== null && raw.portFee !== '' ? Number(raw.portFee) : undefined,
-    remark: raw.remark !== undefined && raw.remark !== null ? String(raw.remark).trim() : undefined
+    workTime: safeStr(raw.workTime),
+    allowance: safeNum(raw.allowance),
+    name: safeStr(raw.name) || undefined,
+    payMonth: safeStr(raw.payMonth) || undefined,
+    portFee: raw.portFee !== undefined && raw.portFee !== null && raw.portFee !== '' ? safeNum(raw.portFee) : undefined,
+    remark: safeStr(raw.remark) || undefined
   }
 }
 
@@ -351,18 +363,40 @@ function getRowTextValues(row: ExcelJS.Row): string[] {
   return values
 }
 
+function extractHeaderValues(row: ExcelJS.Row): string[] {
+  const values: string[] = []
+  const rowValues = row.values
+  if (Array.isArray(rowValues)) {
+    for (let i = 1; i < rowValues.length; i++) {
+      const v = rowValues[i]
+      values.push(v === null || v === undefined ? '' : String(v).trim())
+    }
+  } else {
+    const keys = Object.keys(rowValues || {})
+    const maxIdx = Math.max(...keys.map(k => parseInt(k)).filter(n => !isNaN(n) && n >= 1))
+    for (let i = 1; i <= maxIdx; i++) {
+      const v = (rowValues as Record<string, unknown>)[String(i)]
+      values.push(v === null || v === undefined ? '' : String(v).trim())
+    }
+  }
+  return values
+}
+
 function findXlsxHeaderRow(worksheet: ExcelJS.Worksheet): { headers: Array<keyof ImportedTableARow | undefined>; startRow: number } {
   const maxSearch = 20
   let best: { headers: Array<keyof ImportedTableARow | undefined>; startRow: number; validCount: number; length: number } = { headers: [], startRow: 1, validCount: 0, length: 0 }
+  
   for (let rowNumber = 1; rowNumber <= maxSearch; rowNumber++) {
     const row = worksheet.getRow(rowNumber)
-    const headerCells = getRowTextValues(row)
+    const headerCells = extractHeaderValues(row)
     const mapped = headerCells.map(cell => mapHeader(cell))
     const validCount = mapped.filter(Boolean).length
+    
     if (validCount > best.validCount || (validCount === best.validCount && headerCells.length > best.length)) {
       best = { headers: mapped, startRow: rowNumber + 1, validCount, length: headerCells.length }
     }
   }
+  
   const enoughHeaders = best.validCount >= 2 || (best.validCount >= 1 && best.length >= 4)
   return enoughHeaders ? { headers: best.headers, startRow: best.startRow } : { headers: [], startRow: 2 }
 }
@@ -379,18 +413,31 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParseResult<ImportedTable
       if (!headers.length) continue
 
       const rows: ImportedTableARow[] = []
+      const numericKeys = new Set(['allowance', 'portFee'])
+      
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber < startRow) return
+        
+        const values = row.values
+        const isArray = Array.isArray(values)
         const raw: Record<string, string | number | null> = {}
-
-        const values = getRowValues(row)
-        values.forEach((value, idx) => {
+        
+        for (let idx = 0; idx < headers.length; idx++) {
           const key = headers[idx]
-          if (!key) return
-          const cell = row.getCell(idx + 1)
-          const textValue = typeof cell.text === 'string' && cell.text.trim() ? cell.text.trim() : formatCellValue(value)
-          raw[key] = key === 'allowance' || key === 'portFee' ? Number(textValue) : textValue
-        })
+          if (!key) continue
+          
+          let value: unknown
+          if (isArray) {
+            value = values[idx + 1]
+          } else {
+            value = (values as Record<string, unknown>)[String(idx + 1)]
+          }
+          
+          if (value === null || value === undefined) continue
+          
+          const strValue = typeof value === 'string' ? value.trim() : String(value).trim()
+          raw[key] = numericKeys.has(key) ? safeNum(strValue) : strValue
+        }
 
         if (raw.testDate && (raw.location || raw.region)) {
           rows.push(buildRowFromRaw(raw))
@@ -451,7 +498,7 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
     header: headerMap[key],
     key,
     width: {
-      jobNumber: 16,
+      jobNumber: 18,
       testDate: 18,
       commencedTime: 17,
       completedTime: 20,
@@ -462,7 +509,7 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
       totalHours: 12
     }[key],
     style: {
-      alignment: { vertical: 'middle', horizontal: 'center' }
+      alignment: key === 'jobNumber' ? { vertical: 'middle', horizontal: 'left', wrapText: true } : { vertical: 'middle', horizontal: 'center' }
     }
   }))
 
@@ -541,10 +588,18 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
   }
 
   // 添加数据行（写入数据会追加在表头之后）
-  data.forEach(row => {
+  data.forEach((row, index) => {
     const newRow = worksheet.addRow(row)
-    newRow.eachCell(cell => {
-      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+    newRow.height = 50
+    headers.forEach((key, colIndex) => {
+      const cell = newRow.getCell(colIndex + 1)
+      if (key === 'jobNumber') {
+        cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }
+        cell.font = { name: 'Times New Roman', size: 12, bold: false }
+      } else {
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+        cell.font = { name: 'Times New Roman', size: 12, bold: false }
+      }
       cell.border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
@@ -557,7 +612,7 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
   // 设置表头样式（考虑可能插入的自定义表头偏移）
   // 设置列头样式：使用 Times New Roman，非加粗，与图片一致；添加单元格边框并设置高度
   const headerRow = worksheet.getRow(headerRowIndex)
-  headerRow.height = 28
+  headerRow.height = 35
   headerRow.eachCell((cell) => {
     cell.font = { name: 'Times New Roman', size: 12, bold: true }
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
@@ -584,7 +639,12 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
       const columnIndex = headers.indexOf(columnKey) + 1
       if (columnIndex > 0) {
         worksheet.mergeCells(startRow, columnIndex, endRow, columnIndex)
-        worksheet.getCell(startRow, columnIndex).alignment = { vertical: 'middle', horizontal: 'center' }
+        const cell = worksheet.getCell(startRow, columnIndex)
+        if (columnKey === 'jobNumber') {
+          cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }
+        } else {
+          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+        }
       }
     })
   }
@@ -608,10 +668,10 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
 
     const insertAt = (worksheet.lastRow ? worksheet.lastRow.number + 1 : headerRowIndex + data.length + 1)
 
-    // Subtotal 行：左侧合并为说明，数值放在第7-9列
+    // Subtotal 行：左侧合并为说明（只占据A列和B列），数值放在第7-9列
     worksheet.insertRow(insertAt, [])
     const subtotalIdx = insertAt
-    worksheet.mergeCells(subtotalIdx, 1, subtotalIdx, 6)
+    worksheet.mergeCells(subtotalIdx, 1, subtotalIdx, 2)
     worksheet.getCell(subtotalIdx, 1).value = 'Subtotal in RMB'
     worksheet.getCell(subtotalIdx, 1).font = { name: 'Times New Roman', size: 12, bold: true }
     worksheet.getCell(subtotalIdx, 7).value = sumMeal || 0
@@ -620,7 +680,7 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
     // 添加边框与对齐
     for (let c = 1; c <= headers.length; c++) {
       const cell = worksheet.getCell(subtotalIdx, c)
-      cell.alignment = { vertical: 'middle', horizontal: c <= 6 ? 'left' : 'center' }
+      cell.alignment = { vertical: 'middle', horizontal: c <= 2 ? 'left' : 'center' }
       cell.border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
@@ -629,10 +689,10 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
       }
     }
 
-    // Grandtotal 行：将合计显示在第7-9列合并单元格中
+    // Grandtotal 行：将合计显示在第7-9列合并单元格中（说明只占据A列和B列）
     worksheet.insertRow(subtotalIdx + 1, [])
     const grandIdx = subtotalIdx + 1
-    worksheet.mergeCells(grandIdx, 1, grandIdx, 6)
+    worksheet.mergeCells(grandIdx, 1, grandIdx, 2)
     worksheet.getCell(grandIdx, 1).value = 'Grandtotal in RMB'
     worksheet.getCell(grandIdx, 1).font = { name: 'Times New Roman', size: 12, bold: true }
     worksheet.mergeCells(grandIdx, 7, grandIdx, 9)
@@ -640,7 +700,7 @@ export async function exportToExcel(data: any[], filename: string, headerInfo?: 
     // 样式
     for (let c = 1; c <= headers.length; c++) {
       const cell = worksheet.getCell(grandIdx, c)
-      cell.alignment = { vertical: 'middle', horizontal: c === 7 ? 'center' : 'left' }
+      cell.alignment = { vertical: 'middle', horizontal: c <= 2 ? 'left' : 'center' }
       cell.border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
@@ -725,7 +785,7 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
     header: headerMap[key],
     key,
     width: {
-      jobNumber: 16,
+      jobNumber: 18,
       testDate: 18,
       commencedTime: 17,
       completedTime: 20,
@@ -736,7 +796,7 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
       totalHours: 12
     }[key],
     style: {
-      alignment: { vertical: 'middle', horizontal: 'center' }
+      alignment: key === 'jobNumber' ? { vertical: 'middle', horizontal: 'left', wrapText: true } : { vertical: 'middle', horizontal: 'center' }
     }
   }))
 
@@ -799,10 +859,18 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
     worksheet.getRow(claimRow).height = 24
   }
 
-  data.forEach(row => {
+  data.forEach((row, index) => {
     const newRow = worksheet.addRow(row)
-    newRow.eachCell(cell => {
-      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+    newRow.height = 50
+    headers.forEach((key, colIndex) => {
+      const cell = newRow.getCell(colIndex + 1)
+      if (key === 'jobNumber') {
+        cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }
+        cell.font = { name: 'Times New Roman', size: 12, bold: false }
+      } else {
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+        cell.font = { name: 'Times New Roman', size: 12, bold: false }
+      }
       cell.border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
@@ -813,7 +881,7 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
   })
 
   const headerRow = worksheet.getRow(headerRowIndex)
-  headerRow.height = 28
+  headerRow.height = 35
   headerRow.eachCell((cell) => {
     cell.font = { name: 'Times New Roman', size: 12, bold: true }
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
@@ -830,28 +898,20 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
   let groupKey = data.length > 0 ? `${data[0].jobNumber}|${data[0].testDate}|${data[0].location}` : ''
   const dataStartRow = headerInfo ? headerRowIndex + 1 : headerRowIndex + 1
 
-/**
- * 合并指定范围内的单元格
- * @param {number} startIndex - 起始索引
- * @param {number} endIndex - 结束索引
- */
   const mergeGroup = (startIndex: number, endIndex: number) => {
-  // 如果结束索引小于等于起始索引，则直接返回，不执行合并操作
     if (endIndex <= startIndex) return
-  // 计算实际的起始行号（基于数据起始行和起始索引）
     const startRow = dataStartRow + startIndex
-  // 计算实际的结束行号（基于数据起始行和结束索引）
     const endRow = dataStartRow + endIndex
-  // 遍历所有需要合并的列
     mergeColumns.forEach(columnKey => {
-    // 获取列索引（基于表头中的列位置）
       const columnIndex = headers.indexOf(columnKey) + 1
-    // 如果列存在（索引大于0），则执行合并操作
       if (columnIndex > 0) {
-      // 合并指定范围内的单元格
         worksheet.mergeCells(startRow, columnIndex, endRow, columnIndex)
-      // 设置合并后单元格的对齐方式为垂直和水平居中
-        worksheet.getCell(startRow, columnIndex).alignment = { vertical: 'middle', horizontal: 'center' }
+        const cell = worksheet.getCell(startRow, columnIndex)
+        if (columnKey === 'jobNumber') {
+          cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }
+        } else {
+          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+        }
       }
     })
   }
@@ -874,7 +934,7 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
     const insertAt = (worksheet.lastRow ? worksheet.lastRow.number + 1 : headerRowIndex + data.length + 1)
     worksheet.insertRow(insertAt, [])
     const subtotalIdx = insertAt
-    worksheet.mergeCells(subtotalIdx, 1, subtotalIdx, 6)
+    worksheet.mergeCells(subtotalIdx, 1, subtotalIdx, 2)
     worksheet.getCell(subtotalIdx, 1).value = 'Subtotal in RMB'
     worksheet.getCell(subtotalIdx, 1).font = { name: 'Times New Roman', size: 12, bold: true }
     worksheet.getCell(subtotalIdx, 7).value = sumMeal || 0
@@ -882,7 +942,7 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
     worksheet.getCell(subtotalIdx, 9).value = sumPandemic || 0
     for (let c = 1; c <= headers.length; c++) {
       const cell = worksheet.getCell(subtotalIdx, c)
-      cell.alignment = { vertical: 'middle', horizontal: c <= 6 ? 'left' : 'center' }
+      cell.alignment = { vertical: 'middle', horizontal: c <= 2 ? 'left' : 'center' }
       cell.border = {
         top: { style: 'thin' },
         left: { style: 'thin' },
@@ -892,7 +952,7 @@ async function buildAllowanceWorkbook(data: any[], headerInfo?: { title?: string
     }
     worksheet.insertRow(subtotalIdx + 1, [])
     const grandIdx = subtotalIdx + 1
-    worksheet.mergeCells(grandIdx, 1, grandIdx, 6)
+    worksheet.mergeCells(grandIdx, 1, grandIdx, 2)
     worksheet.getCell(grandIdx, 1).value = 'Grandtotal in RMB'
     worksheet.getCell(grandIdx, 1).font = { name: 'Times New Roman', size: 12, bold: true }
     worksheet.mergeCells(grandIdx, 7, grandIdx, 9)
@@ -979,25 +1039,25 @@ async function buildTrafficWorkbook(data: ExportTrafficRow[]) {
   }
   const headerRedFont: Partial<ExcelJS.Font> = {
     name: '微软雅黑',
-    size: 12,
+    size: 10,
     bold: true,
     color: { argb: 'FFFF0000' }
   }
   const headerDefaultFont: Partial<ExcelJS.Font> = {
     name: '微软雅黑',
-    size: 12,
+    size: 10,
     bold: true,
     color: { argb: 'FF000000' }
   }
   const cellDefaultFont: Partial<ExcelJS.Font> = {
     name: '微软雅黑',
-    size: 12,
+    size: 10,
     bold: false,
     color: { argb: 'FF000000' }
   }
   const cellAmountFont: Partial<ExcelJS.Font> = {
     name: '微软雅黑',
-    size: 12,
+    size: 10,
     bold: true,
     color: { argb: 'FF000000' }
   }
@@ -1025,7 +1085,7 @@ async function buildTrafficWorkbook(data: ExportTrafficRow[]) {
     data.forEach((row, rowIndex) => {
       // 添加新行
       const newRow = worksheet.addRow(row)
-      newRow.height = 32
+      newRow.height = 22
       // 为每个单元格设置样式
       headers.forEach((key, colIndex) => {
         const cell = newRow.getCell(colIndex + 1)
@@ -1065,7 +1125,7 @@ async function buildTrafficWorkbook(data: ExportTrafficRow[]) {
 
   // 设置表头行样式
   const headerRow = worksheet.getRow(1)
-  headerRow.height = 32 // 设置行高
+  headerRow.height = 22 // 设置行高
   headers.forEach((key, colIndex) => {
     const cell = headerRow.getCell(colIndex + 1)
     // 地区/码头：红色字体
@@ -1087,40 +1147,6 @@ async function buildTrafficWorkbook(data: ExportTrafficRow[]) {
     }
   })
 
-  // 添加金额合计行
-  const totalAmount = data.reduce((sum, row) => sum + Number(row.trafficAllowance || 0), 0)
-  const totalRowIndex = data.length + 2 // 数据行之后添加一行
-
-  // 在最后一行后添加合计行
-  const lastDataRow = worksheet.getRow(data.length + 1)
-  const totalRow = worksheet.addRow(['合计', '', '', '', '', '', '', totalAmount])
-  totalRow.height = 32
-
-  // 设置合计行样式
-  for (let colIndex = 1; colIndex <= headers.length; colIndex++) {
-    const cell = totalRow.getCell(colIndex)
-    cell.font = {
-      name: '微软雅黑',
-      size: 12,
-      bold: true,
-      color: { argb: 'FF000000' }
-    }
-    cell.border = {
-      top: { style: 'medium', color: { argb: 'FF000000' } },
-      left: { style: 'thin', color: { argb: 'FF000000' } },
-      bottom: { style: 'medium', color: { argb: 'FF000000' } },
-      right: { style: 'thin', color: { argb: 'FF000000' } }
-    }
-    // 前7列左对齐
-    if (colIndex <= 7) {
-      cell.alignment = { vertical: 'middle', horizontal: 'center' }
-    } else {
-      // 金额列右对齐
-      cell.numFmt = '0.00'
-      cell.alignment = { vertical: 'middle', horizontal: 'right' }
-    }
-  }
-
   return workbook
 }
 
@@ -1133,14 +1159,17 @@ export async function exportTablesZip(
   const zip = new JSZip()
   const trafficWorkbook = await buildTrafficWorkbook(trafficData)
   const allowanceWorkbook = await buildAllowanceWorkbook(allowanceData, headerInfo)
+  const summaryWorkbook = await buildSummaryWorkbook(trafficData)
 
-  const [trafficBuffer, allowanceBuffer] = await Promise.all([
+  const [trafficBuffer, allowanceBuffer, summaryBuffer] = await Promise.all([
     trafficWorkbook.xlsx.writeBuffer(),
-    allowanceWorkbook.xlsx.writeBuffer()
+    allowanceWorkbook.xlsx.writeBuffer(),
+    summaryWorkbook.xlsx.writeBuffer()
   ])
 
   zip.file('交通费津贴明细.xlsx', trafficBuffer)
   zip.file('Allowance Details.xlsx', allowanceBuffer)
+  zip.file('交通费津贴合计表.xlsx', summaryBuffer)
 
   const content = await zip.generateAsync({ type: 'blob' })
   
@@ -1217,28 +1246,34 @@ async function buildSummaryWorkbook(trafficData: ExportTrafficRow[]) {
     { header: '', key: 'col3', width: 22 }
   ]
 
-  // 从交通明细中提取支付月份，转换为"2026/5/25"格式
-  const firstRow = trafficData[0]
+  // 从交通明细最后一行提取外勤日期作为支付月份
+  const lastRow = trafficData[trafficData.length - 1]
   let referenceDate = ''
-  if (firstRow && firstRow.payMonth) {
-    const pm = firstRow.payMonth
-    const match = pm.match(/(\d+)年(\d+)月/)
-    if (match) {
-      referenceDate = `${match[1]}/${match[2]}/25`
+  if (lastRow && lastRow.outdoorDate) {
+    // 格式化日期为 2026/5/25 格式
+    const od = lastRow.outdoorDate
+    const odMatch = od.match(/(\d+)[\/\-](\d+)[\/\-](\d+)/)
+    if (odMatch) {
+      referenceDate = `${odMatch[1]}/${odMatch[2]}/${odMatch[3]}`
     } else {
-      // 回退：使用 outdoorDate 去除"日"并格式化为 年/月/日
-      const od = firstRow.outdoorDate
-      const odMatch = od.match(/(\d+)[\/-](\d+)[\/-](\d+)/)
-      if (odMatch) {
-        referenceDate = `${odMatch[1]}/${odMatch[2]}/${odMatch[3]}`
-      } else {
-        referenceDate = pm
-      }
+      referenceDate = od
     }
   }
 
-  const rowCount = trafficData.length
-  const totalAmount = 200 * rowCount
+  // 从交通明细中提取工号和姓名（去重）
+  const employeeMap = new Map<string, string>()
+  trafficData.forEach(row => {
+    if (row.employeeId && row.name) {
+      employeeMap.set(row.employeeId, row.name)
+    }
+  })
+
+  // 计算总金额：从交通明细表数据中获取
+  const totalAmount = trafficData.reduce((sum, row) => {
+    // 如果有交通津贴字段则使用，否则默认200
+    const amount = row.trafficAllowance || 200
+    return sum + amount
+  }, 0)
 
   // 字体样式
   const defaultFont: Partial<ExcelJS.Font> = {
@@ -1254,11 +1289,18 @@ async function buildSummaryWorkbook(trafficData: ExportTrafficRow[]) {
     color: { argb: 'FF000000' }
   }
 
-  // 浅蓝背景色（用于数据行）
+  // 浅蓝背景色
   const lightBlueFill: ExcelJS.FillPattern = {
     type: 'pattern',
     pattern: 'solid',
     fgColor: { argb: 'FFE1ECF4' }
+  }
+
+  // 白色背景
+  const whiteFill: ExcelJS.FillPattern = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFFFFFFF' }
   }
 
   const borderStyle: Partial<ExcelJS.Borders> = {
@@ -1268,49 +1310,134 @@ async function buildSummaryWorkbook(trafficData: ExportTrafficRow[]) {
     right: { style: 'thin', color: { argb: 'FFBFBFBF' } }
   }
 
-  // 行 1：支付月份 + 日期
+  // 行高配置：所有行高固定为22
+  const rowHeight = 22
+
+  // 行 1：支付月份（浅蓝背景）| 日期（白色）| 空（白色）
   const headerRow1 = worksheet.addRow(['支付月份', referenceDate, ''])
-  headerRow1.height = 32
-  headerRow1.eachCell((cell) => {
-    cell.font = boldFont
-    cell.alignment = { vertical: 'middle', horizontal: 'left' }
-  })
+  headerRow1.height = rowHeight
+  
+  const cell1_1 = headerRow1.getCell(1)
+  cell1_1.font = boldFont
+  cell1_1.alignment = { vertical: 'middle', horizontal: 'left' }
+  cell1_1.fill = lightBlueFill
+  cell1_1.border = borderStyle
+  
+  const cell1_2 = headerRow1.getCell(2)
+  cell1_2.font = boldFont
+  cell1_2.alignment = { vertical: 'middle', horizontal: 'left' }
+  cell1_2.fill = whiteFill
+  cell1_2.border = borderStyle
+  
+  const cell1_3 = headerRow1.getCell(3)
+  cell1_3.font = boldFont
+  cell1_3.alignment = { vertical: 'middle', horizontal: 'left' }
+  cell1_3.fill = whiteFill
+  cell1_3.border = borderStyle
 
-  // 行 2：表头行 Row Labels | 姓名 | 交通津贴合计
+  // 行 2：空行（与支付月份间隔一行）
+  const emptyRow1 = worksheet.addRow(['', '', ''])
+  emptyRow1.height = rowHeight
+  
+  const e1Cell1 = emptyRow1.getCell(1)
+  e1Cell1.fill = whiteFill
+  e1Cell1.border = borderStyle
+  
+  const e1Cell2 = emptyRow1.getCell(2)
+  e1Cell2.fill = whiteFill
+  e1Cell2.border = borderStyle
+  
+  const e1Cell3 = emptyRow1.getCell(3)
+  e1Cell3.fill = whiteFill
+  e1Cell3.border = borderStyle
+
+  // 行 3：Row Labels（浅蓝）| 姓名（浅蓝）| 交通津贴合计（白色）
   const headerRow2 = worksheet.addRow(['Row Labels', '姓名', '交通津贴合计'])
-  headerRow2.height = 32
-  headerRow2.eachCell((cell) => {
-    cell.font = boldFont
-    cell.alignment = { vertical: 'middle', horizontal: 'left' }
-    cell.border = borderStyle
+  headerRow2.height = rowHeight
+  
+  const cell2_1 = headerRow2.getCell(1)
+  cell2_1.font = boldFont
+  cell2_1.alignment = { vertical: 'middle', horizontal: 'left' }
+  cell2_1.fill = lightBlueFill
+  cell2_1.border = borderStyle
+  
+  const cell2_2 = headerRow2.getCell(2)
+  cell2_2.font = boldFont
+  cell2_2.alignment = { vertical: 'middle', horizontal: 'left' }
+  cell2_2.fill = lightBlueFill
+  cell2_2.border = borderStyle
+  
+  const cell2_3 = headerRow2.getCell(3)
+  cell2_3.font = boldFont
+  cell2_3.alignment = { vertical: 'middle', horizontal: 'left' }
+  cell2_3.fill = whiteFill
+  cell2_3.border = borderStyle
+
+  // 行 4：数据行（每个员工一行，金额显示总金额）
+  const dataRows: ExcelJS.Row[] = []
+  employeeMap.forEach((name, employeeId) => {
+    const dataRow = worksheet.addRow([employeeId, name, totalAmount])
+    dataRow.height = rowHeight
+    dataRows.push(dataRow)
+    
+    const dCell1 = dataRow.getCell(1)
+    dCell1.font = defaultFont
+    dCell1.alignment = { vertical: 'middle', horizontal: 'left' }
+    dCell1.fill = whiteFill
+    dCell1.border = borderStyle
+    
+    const dCell2 = dataRow.getCell(2)
+    dCell2.font = defaultFont
+    dCell2.alignment = { vertical: 'middle', horizontal: 'left' }
+    dCell2.fill = whiteFill
+    dCell2.border = borderStyle
+    
+    const dCell3 = dataRow.getCell(3)
+    dCell3.font = defaultFont
+    dCell3.alignment = { vertical: 'middle', horizontal: 'right' }
+    dCell3.fill = whiteFill
+    dCell3.border = borderStyle
+    dCell3.numFmt = '0.00'
   })
 
-  // 行 3：数据行 - 空 | 空 | 总计金额
-  const dataRow = worksheet.addRow(['', '', totalAmount])
-  dataRow.height = 32
-  dataRow.eachCell((cell) => {
-    cell.font = defaultFont
-    cell.alignment = { vertical: 'middle', horizontal: 'left' }
-    cell.fill = lightBlueFill
-    cell.border = borderStyle
-  })
-  // 金额列格式化：右对齐、两位小数
-  const amountCell = dataRow.getCell(3)
-  amountCell.numFmt = '0.00'
-  amountCell.alignment = { vertical: 'middle', horizontal: 'right' }
+  // 确保总计行在第六行（如果数据行不足1行，则添加空行）
+  const currentLastRow = 3 + employeeMap.size
+  if (currentLastRow < 5) {
+    for (let i = currentLastRow; i < 5; i++) {
+      const emptyRow = worksheet.addRow(['', '', ''])
+      emptyRow.height = rowHeight
+      
+      const eCell1 = emptyRow.getCell(1)
+      eCell1.fill = whiteFill
+      eCell1.border = borderStyle
+      
+      const eCell2 = emptyRow.getCell(2)
+      eCell2.fill = whiteFill
+      eCell2.border = borderStyle
+      
+      const eCell3 = emptyRow.getCell(3)
+      eCell3.fill = whiteFill
+      eCell3.border = borderStyle
+    }
+  }
 
-  // 行 4：总计行
+  // 行 6：总计行（浅蓝，跨列1-2）| | 总金额（白色）
   const totalRow = worksheet.addRow(['总计', '', totalAmount])
-  totalRow.height = 32
-  totalRow.eachCell((cell) => {
-    cell.font = boldFont
-    cell.alignment = { vertical: 'middle', horizontal: 'left' }
-    cell.fill = lightBlueFill
-    cell.border = borderStyle
-  })
-  const totalAmountCell = totalRow.getCell(3)
-  totalAmountCell.numFmt = '0.00'
-  totalAmountCell.alignment = { vertical: 'middle', horizontal: 'right' }
+  totalRow.height = rowHeight
+  worksheet.mergeCells(6, 1, 6, 2)
+  
+  const totalCell1 = totalRow.getCell(1)
+  totalCell1.font = boldFont
+  totalCell1.alignment = { vertical: 'middle', horizontal: 'left' }
+  totalCell1.fill = lightBlueFill
+  totalCell1.border = borderStyle
+  
+  const totalCell3 = totalRow.getCell(3)
+  totalCell3.font = boldFont
+  totalCell3.alignment = { vertical: 'middle', horizontal: 'right' }
+  totalCell3.fill = whiteFill
+  totalCell3.border = borderStyle
+  totalCell3.numFmt = '0.00'
 
   return workbook
 }
