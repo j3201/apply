@@ -82,6 +82,23 @@
         :closable="false"
         show-icon
       />
+
+      <div v-if="showUploadProgress" role="progressbar" :aria-valuenow="uploadProgress" aria-valuemin="0" aria-valuemax="100" class="upload-progress-container">
+        <div class="upload-progress-wrapper">
+          <div class="progress-info">
+            <span class="progress-text">{{ statusText }}</span>
+          </div>
+          <div class="progress-bar-wrapper">
+            <div class="progress-bar-track">
+              <div 
+                class="progress-bar-fill" 
+                :style="{ width: `${uploadProgress}%` }"
+              ></div>
+            </div>
+            <span class="progress-percentage">{{ Math.round(uploadProgress) }}%</span>
+          </div>
+        </div>
+      </div>
     </el-card>
 
     <el-tabs v-model="activeTab" type="border-card" class="main-tabs">
@@ -431,6 +448,9 @@ interface TableTrafficRow {
 // ---------------------- A表数据（报销审核表） ----------------------
 const tableAData = ref<TableARow[]>([])
 const uploadStatus = ref('')
+const uploadProgress = ref(0)
+const showUploadProgress = ref(false)
+const statusText = ref('正在初始化...')
 
 // ---------------------- B表数据（自动生成） ----------------------
 const tableBData = ref<TableBRow[]>([])
@@ -757,14 +777,51 @@ function splitWorkTime(workTime: string) {
   }
 }
 
+function isLegalHoliday(dateStr: string): boolean {
+  if (!dateStr) return false
+  
+  // 解析日期字符串，提取月和日
+  // 支持格式：2026/4/5, 2026/04/05, 2026-4-5, 2026-04-05 等
+  const match = dateStr.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/)
+  if (!match || !match[2] || !match[3]) return false
+  
+  const month = parseInt(match[2], 10)
+  const day = parseInt(match[3], 10)
+  
+  const legalHolidays = [
+    { month: 1, day: 1 },    // 元旦
+    { month: 2, day: 17 },   // 春节（农历除夕）
+    { month: 2, day: 18 },   // 春节（正月初一）
+    { month: 2, day: 19 },   // 春节（初二）
+    { month: 2, day: 20 },   // 春节（初三）
+    { month: 4, day: 5 },    // 清明节
+    { month: 5, day: 1 },    // 劳动节
+    { month: 5, day: 2 },    // 劳动节
+    { month: 6, day: 19 },   // 端午节（农历五月初五）
+    { month: 10, day: 1 },   // 国庆节
+    { month: 10, day: 2 },   // 国庆节
+    { month: 10, day: 3 },   // 国庆节
+    { month: 10, day: 4 }    // 中秋节
+  ]
+  
+  return legalHolidays.some(h => h.month === month && h.day === day)
+}
+
 function generateBTable() {
   tableBData.value = []
 
   tableAData.value.forEach(rowA => {
+    const testDate = preserveDateOnly(rowA.testDate)
+    
+    if (isLegalHoliday(testDate)) {
+      console.log(`跳过法定节假日行: ${testDate}`)
+      return
+    }
+
     const allowance = Number(rowA.allowance || 0)
     const baseRow = {
       jobNumber: rowA.id,
-      testDate: preserveDateOnly(rowA.testDate),
+      testDate,
       location: rowA.region || rowA.location
     }
 
@@ -883,12 +940,31 @@ function mergeBCells({ row, column, rowIndex }: { row: TableBRow; column: any; r
 // ---------------------- 辅助方法：上传A表 ----------------------
 async function handleFileChange(uploadFile: any) {
   try {
+    showUploadProgress.value = true
+    uploadProgress.value = 0
+    uploadStatus.value = ''
+    statusText.value = '正在初始化...'
+
+    const progressInterval = setInterval(() => {
+      if (uploadProgress.value < 90) {
+        uploadProgress.value += Math.random() * 15
+      }
+    }, 200)
+
     if (!portTrafficStore.loaded) {
+      uploadProgress.value = 10
+      statusText.value = '正在初始化数据...'
       await portTrafficStore.initialize()
     }
 
+    uploadProgress.value = 30
+    statusText.value = '正在读取文件...'
     const rows = await importFromExcel(uploadFile.raw)
-    tableAData.value = rows.map(row => buildAItem({
+    
+    uploadProgress.value = 70
+    statusText.value = '正在处理数据...'
+    
+    const newTableAData = rows.map(row => ({
       ...row,
       commencedTime1: '6:30:00',
       completedTime1: '13:00:00',
@@ -896,9 +972,13 @@ async function handleFileChange(uploadFile: any) {
       completedTime2: '19:00:00'
     }))
 
+    tableAData.value = newTableAData
+
+    uploadProgress.value = 100
+    statusText.value = '完成！'
+    clearInterval(progressInterval)
+
     if (rows.length > 0) {
-      uploadStatus.value = `已成功上传 ${rows.length} 条 A 表数据，正在生成 B 表...`
-      await nextTick()
       if (tableBData.value.length > 0) {
         uploadStatus.value = `已生成 ${tableBData.value.length} 条 B 表数据`
         ElMessage.success({
@@ -919,7 +999,16 @@ async function handleFileChange(uploadFile: any) {
         duration: 5000
       })
     }
+
+    setTimeout(() => {
+      showUploadProgress.value = false
+      uploadProgress.value = 0
+      statusText.value = '正在初始化...'
+    }, 2000)
   } catch (error) {
+    uploadProgress.value = 0
+    showUploadProgress.value = false
+    statusText.value = '上传失败'
     uploadStatus.value = error instanceof Error ? error.message : '上传失败，请检查文件格式或内容'
     ElMessage.error({
       message: uploadStatus.value,
@@ -1066,6 +1155,55 @@ const headerStyle = {
 .defaults-form :deep(.el-form-item__label) {
   font-weight: 600;
   color: #475569;
+}
+
+.upload-progress-container {
+  margin-top: 16px;
+}
+
+.upload-progress-wrapper {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 16px 20px;
+  border: 1px solid #e2e8f0;
+}
+
+.progress-info {
+  margin-bottom: 12px;
+}
+
+.progress-text {
+  font-size: 14px;
+  color: #64748b;
+}
+
+.progress-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-bar-track {
+  flex: 1;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease-out;
+}
+
+.progress-percentage {
+  font-size: 14px;
+  font-weight: 600;
+  color: #667eea;
+  min-width: 40px;
+  text-align: right;
 }
 
 .main-tabs {
