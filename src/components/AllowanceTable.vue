@@ -20,7 +20,7 @@
         >
           <el-button type="primary">
             <el-icon><Upload /></el-icon>
-            选择上传 A 表
+            上传报销表
           </el-button>
         </el-upload>
 
