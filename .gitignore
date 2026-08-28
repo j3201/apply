@@ -37,3 +37,7 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+.vite/
+
+# 嵌套的独立仓库（同一远程的另一个工作副本，避免被当作 gitlink 提交）
+/apply-source/
